@@ -2,23 +2,23 @@ import os
 from setuptools import setup, find_packages
 import glob
 
-VERSION = "0.8.4"
+VERSION = "0.8.5"
 
 src_dir = os.path.dirname(__file__)
 
 install_requires = [
-    "troposphere~=1.8.1",
+    "troposphere~=1.9.0",
     "boto3>=1.3.1,<1.5.0",
-    "botocore~=1.4.38",
     "PyYAML~=3.11",
     "awacs~=0.6.0",
     "colorama~=0.3.7",
+    "formic~=0.9b"
 ]
 
 tests_require = [
     "nose~=1.0",
     "mock~=2.0.0",
-    "moto~=0.4.25",
+    "moto~=0.4.30",
     "testfixtures~=4.10.0",
 ]
 

@@ -141,6 +141,9 @@ def wait_till_change_set_complete(cfn_client, change_set_id, try_count=5,
         if complete:
             break
         time.sleep(sleep_time)
+
+        # exponential backoff
+        sleep_time *= 2
     if not complete:
         raise exceptions.ChangesetDidNotStabilize(change_set_id)
     return response
@@ -161,8 +164,9 @@ def create_change_set(cfn_client, fqn, template_url, parameters, tags,
         },
     )
     change_set_id = response["Id"]
+    # Exponential backoff, this will wait just over 2 minutes
     response = wait_till_change_set_complete(
-        cfn_client, change_set_id, sleep_time=2
+        cfn_client, change_set_id, sleep_time=2, try_count=7
     )
     status = response["Status"]
     if status == "FAILED":

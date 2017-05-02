@@ -53,6 +53,10 @@ dist/
 .eggs/
 *.egg
 
+# IntelliJ IDEA
+*.iml
+.idea
+
 # nosetest --with-coverage dumps these in CWD
 .coverage
 

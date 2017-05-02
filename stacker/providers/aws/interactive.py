@@ -214,7 +214,7 @@ class Provider(AWSProvider):
                            replacements_only=self.replacements_only)
             if not diff:
                 ask_for_approval(
-                    full_changes=full_changes,
+                    full_changeset=full_changes,
                     include_verbose=True,
                 )
 

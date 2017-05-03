@@ -108,14 +108,15 @@ def output_summary(fqn, action, changeset, replacements_only=False):
     logger.info('%s %s:\n%s', fqn, action, summary)
 
 
-def wait_till_change_set_complete(cfn_client, change_set_id, try_count=5,
-                                  sleep_time=.1):
+def wait_till_change_set_complete(cfn_client, change_set_id, try_count=25,
+                                  sleep_time=.5, max_sleep=3):
     """ Checks state of a changeset, returning when it is in a complete state.
 
     Since changesets can take a little bit of time to get into a complete
     state, we need to poll it until it does so. This will try to get the
     state 5 times, waiting `sleep_time` seconds between each try. If, after
-    that time, the changeset is not in a complete state it fails.
+    that time, the changeset is not in a complete state it fails. These
+    default settings will wait a little over one minute.
 
     Args:
         cfn_client (:class:`botocore.client.CloudFormation`): Used to query
@@ -123,6 +124,7 @@ def wait_till_change_set_complete(cfn_client, change_set_id, try_count=5,
         change_set_id (str): The unique changeset id to wait for.
         try_count (int): Number of times to try the call.
         sleep_time (int): Time to sleep between attempts.
+        max_sleep (int): Max time to sleep during backoff
 
     Return:
         dict: The response from cloudformation for the describe_change_set
@@ -142,8 +144,8 @@ def wait_till_change_set_complete(cfn_client, change_set_id, try_count=5,
             break
         time.sleep(sleep_time)
 
-        # exponential backoff
-        sleep_time *= 2
+        # exponential backoff with max
+        sleep_time = min(sleep_time * 2, max_sleep)
     if not complete:
         raise exceptions.ChangesetDidNotStabilize(change_set_id)
     return response
@@ -164,9 +166,8 @@ def create_change_set(cfn_client, fqn, template_url, parameters, tags,
         },
     )
     change_set_id = response["Id"]
-    # Exponential backoff, this will wait just over 2 minutes
     response = wait_till_change_set_complete(
-        cfn_client, change_set_id, sleep_time=2, try_count=7
+        cfn_client, change_set_id
     )
     status = response["Status"]
     if status == "FAILED":

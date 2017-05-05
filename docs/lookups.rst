@@ -20,7 +20,7 @@ data structure and within another lookup itself.
 
   ie. if `custom` returns a list, this would raise an exception::
 
-    Variable: ${custom something}, ${otherStack::Output}
+    Variable: ${custom something}, ${output otherStack::Output}
 
   This is valid::
 
@@ -34,11 +34,11 @@ For example, given the following::
       class_path: some.stack.blueprint.Blueprint
       variables:
         Roles:
-          - ${otherStack::IAMRole}
+          - ${output otherStack::IAMRole}
         Values:
           Env:
-            Custom: ${custom ${otherStack::Output}}
-            DBUrl: postgres://${dbStack::User}@${dbStack::HostName}
+            Custom: ${custom ${output otherStack::Output}}
+            DBUrl: postgres://${output dbStack::User}@${output dbStack::HostName}
 
 The Blueprint would have access to the following resolved variables
 dictionary::
@@ -59,23 +59,23 @@ stacker includes the following lookup types:
   - output_
   - kms_
   - xref_
+  - rxref
 
 .. _output:
 
 Output Lookup
 -------------
 
-The ``output`` lookup type is the default lookup type. It takes a value of
-the format: ``<stack name>::<output name>`` and retrieves the output from
-the given stack name within the current namespace.
+The ``output`` lookup takes a value of the format:
+``<stack name>::<output name>`` and retrieves the output from the given stack
+name within the current namespace.
 
 stacker treats output lookups differently than other lookups by auto
 adding the referenced stack in the lookup as a requirement to the stack
 whose variable the output value is being passed to.
 
-You can specify an output lookup with the following equivalent syntax::
+You can specify an output lookup with the following syntax::
 
-  ConfVariable: ${someStack::SomeOutput}
   ConfVariable: ${output someStack::SomeOutput}
 
 .. _kms:
@@ -138,6 +138,30 @@ requirements.
 For example::
 
   ConfVariable: ${xref fully-qualified-stack::SomeOutput}
+
+.. file:
+
+.. _rxref:
+
+RXRef Lookup
+-----------
+
+The ``rxref`` lookup type is very similar to the ``output`` and ``xref`` lookup
+type, the difference being that ``rxref`` resolves output values from stacks
+that are relative to the current namespace but external to the stack.
+
+The ``output`` type will take a stack name prefixed by the namespace
+and use the current context to expand the fully qualified stack name
+based on the namespace. ``rxref`` skips this expansion because it assumes
+you've provided it with the fully qualified stack name already. This allows
+you to reference output values from any CloudFormation stack.
+
+Also, unlike the ``output`` lookup type, ``rxref`` doesn't impact stack
+requirements.
+
+For example::
+
+  ConfVariable: ${rxref fully-qualified-stack::SomeOutput}
 
 .. file:
 

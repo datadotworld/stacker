@@ -206,7 +206,7 @@ class Provider(AWSProvider):
                                                    tags, **kwargs)
 
         action = "replacements" if self.replacements_only else "changes"
-        full_changes = changes
+        full_changeset = changes
         if self.replacements_only:
             changes = requires_replacement(changes)
 
@@ -215,7 +215,7 @@ class Provider(AWSProvider):
                            replacements_only=self.replacements_only)
             if not diff:
                 ask_for_approval(
-                    full_changeset=full_changes,
+                    full_changeset=full_changeset,
                     include_verbose=True,
                 )
 

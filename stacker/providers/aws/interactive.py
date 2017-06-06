@@ -3,11 +3,12 @@ import time
 
 import yaml
 
-from ... import exceptions
 from .default import (
     Provider as AWSProvider,
     retry_on_throttling,
 )
+from ... import exceptions
+from ...actions.diff import diff_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,16 @@ def get_raw_input(message):
     return raw_input(message)
 
 
-def ask_for_approval(full_changeset=None, include_verbose=False):
+def ask_for_approval(full_changeset=None, params_diff=None,
+                     include_verbose=False):
     """Prompt the user for approval to execute a change set.
 
     Args:
         full_changeset (list, optional): A list of the full changeset that will
             be output if the user specifies verbose.
+        params_diff (list, optional): A list of dictionaries detailing the
+            differences between two parameters returned by
+            :func:`stacker.actions.diff.diff_dictionaries`
         include_verbose (bool, optional): Boolean for whether or not to include
             the verbose option
 
@@ -61,22 +66,33 @@ def ask_for_approval(full_changeset=None, include_verbose=False):
         '/'.join(approval_options)))
 
     if include_verbose and approve == "v":
-        logger.info(
-            "Full changeset:\n%s",
-            yaml.safe_dump(full_changeset),
-        )
+        if params_diff:
+            logger.info(
+                "Full changeset:\n%s\n%s",
+                summarize_params_diff(params_diff),
+                yaml.safe_dump(full_changeset),
+            )
+        else:
+            logger.info(
+                "Full changeset:\n%s",
+                yaml.safe_dump(full_changeset),
+            )
         return ask_for_approval()
     elif approve != "y":
         raise exceptions.CancelExecution
 
 
-def output_summary(fqn, action, changeset, replacements_only=False):
+def output_summary(fqn, action, changeset, params_diff,
+                   replacements_only=False):
     """Log a summary of the changeset.
 
     Args:
         fqn (string): fully qualified name of the stack
         action (string): action to include in the log message
         changeset (list): AWS changeset
+        params_diff (list): A list of dictionaries detailing the differences
+            between two parameters returned by
+            :func:`stacker.actions.diff.diff_dictionaries`
         replacements_only (bool, optional): boolean for whether or not we only
             want to list replacements
 
@@ -97,6 +113,8 @@ def output_summary(fqn, action, changeset, replacements_only=False):
             changes.append(summary)
 
     summary = ''
+    if params_diff:
+        summary += summarize_params_diff(params_diff)
     if replacements:
         if not replacements_only:
             summary += 'Replacements:\n'
@@ -106,6 +124,15 @@ def output_summary(fqn, action, changeset, replacements_only=False):
             summary += '\n'
         summary += 'Changes:\n%s' % ('\n'.join(changes))
     logger.info('%s %s:\n%s', fqn, action, summary)
+
+
+def summarize_params_diff(params_diff):
+    summary = ''
+    summary_lines = ["%s %s = %s" % (line[0], line[1], line[2])
+                     for line in params_diff if line[0] != ' ']
+    if summary_lines:
+        summary = 'Parameters Changed:\n%s\n' % '\n'.join(summary_lines)
+    return summary
 
 
 def wait_till_change_set_complete(cfn_client, change_set_id, try_count=25,
@@ -205,23 +232,27 @@ class Provider(AWSProvider):
         self.replacements_only = replacements_only
         super(Provider, self).__init__(region=region, *args, **kwargs)
 
-    def update_stack(self, fqn, template_url, parameters, tags, diff=False,
-                     **kwargs):
+    def update_stack(self, fqn, template_url, old_parameters, parameters,
+                     tags, diff=False, **kwargs):
         changes, change_set_id = create_change_set(self.cloudformation, fqn,
                                                    template_url, parameters,
                                                    tags, **kwargs)
+        params_diff = diff_parameters(
+            AWSProvider.params_as_dict(old_parameters),
+            AWSProvider.params_as_dict(parameters))
 
         action = "replacements" if self.replacements_only else "changes"
         full_changeset = changes
         if self.replacements_only:
             changes = requires_replacement(changes)
 
-        if changes:
-            output_summary(fqn, action, changes,
+        if changes or params_diff:
+            output_summary(fqn, action, changes, params_diff,
                            replacements_only=self.replacements_only)
             if not diff:
                 ask_for_approval(
                     full_changeset=full_changeset,
+                    params_diff=params_diff,
                     include_verbose=True,
                 )
 

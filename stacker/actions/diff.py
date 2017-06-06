@@ -59,7 +59,7 @@ def print_diff_parameters(parameter_diff):
     """Handles the printing of differences in parameters.
 
     Args:
-        parameter_diff (list): A list dictionaries detailing the differences
+        parameter_diff (list): A list of dictionaries detailing the differences
             between two parameters returned by
             :func:`stacker.actions.diff.diff_dictionaries`
     """

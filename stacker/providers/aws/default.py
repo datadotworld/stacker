@@ -220,13 +220,15 @@ class Provider(BaseProvider):
         )
         return True
 
-    def update_stack(self, fqn, template_url, parameters, tags, **kwargs):
+    def update_stack(self, fqn, template_url, old_parameters, parameters,
+                     tags, **kwargs):
         try:
             logger.debug("Attempting to update stack %s.", fqn)
             retry_on_throttling(
                 self.cloudformation.update_stack,
                 kwargs=dict(StackName=fqn,
                             TemplateURL=template_url,
+                            OldParameters=old_parameters,
                             Parameters=parameters,
                             Tags=tags,
                             Capabilities=["CAPABILITY_NAMED_IAM"]),
@@ -274,9 +276,13 @@ class Provider(BaseProvider):
             raise exceptions.StackDoesNotExist(stack_name)
 
         stack = stacks['Stacks'][0]
-        parameters = dict()
-        if 'Parameters' in stack:
-            for p in stack['Parameters']:
-                parameters[p['ParameterKey']] = p['ParameterValue']
+        parameters = self.params_as_dict(stack.get('Parameters', []))
 
         return [json.dumps(template), parameters]
+
+    @staticmethod
+    def params_as_dict(parameters_list):
+        parameters = dict()
+        for p in parameters_list:
+            parameters[p['ParameterKey']] = p['ParameterValue']
+        return parameters

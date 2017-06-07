@@ -128,22 +128,50 @@ class TestInteractiveProviderMethods(unittest.TestCase):
         for resource in replacement:
             self.assertEqual(resource["ResourceChange"]["Replacement"], "True")
 
-    def test_ask_for_approval(self):
+    @patch("stacker.providers.aws.interactive.summarize_params_diff")
+    def test_ask_for_approval(self, patched_summarize_params_diff):
         get_input_path = "stacker.providers.aws.interactive.get_raw_input"
         with patch(get_input_path, return_value="y"):
-            self.assertIsNone(ask_for_approval([]))
+            self.assertIsNone(ask_for_approval([], [], None))
 
         for v in ("n", "N", "x", "\n"):
             with patch(get_input_path, return_value=v):
                 with self.assertRaises(exceptions.CancelExecution):
-                    ask_for_approval([])
+                    ask_for_approval([], [])
 
         with patch(get_input_path, side_effect=["v", "n"]) as mock_get_input:
             with patch("yaml.safe_dump") as mock_safe_dump:
                 with self.assertRaises(exceptions.CancelExecution):
-                    ask_for_approval([], True)
+                    ask_for_approval([], [], True)
                 self.assertEqual(mock_safe_dump.call_count, 1)
             self.assertEqual(mock_get_input.call_count, 2)
+
+        self.assertEqual(patched_summarize_params_diff.call_count, 0)
+
+    @patch("stacker.providers.aws.interactive.summarize_params_diff")
+    def test_ask_for_approval_with_params_diff(self, patched_summarize):
+        get_input_path = "stacker.providers.aws.interactive.get_raw_input"
+        params_diff = [
+            [' ', 'ParamA', 'new-param-value'],
+            ['-', 'ParamB', 'param-b-old-value'],
+            ['+', 'ParamB', 'param-b-new-value-delta'],
+        ]
+        with patch(get_input_path, return_value="y"):
+            self.assertIsNone(ask_for_approval([], params_diff, None))
+
+        for v in ("n", "N", "x", "\n"):
+            with patch(get_input_path, return_value=v):
+                with self.assertRaises(exceptions.CancelExecution):
+                    ask_for_approval([], params_diff)
+
+        with patch(get_input_path, side_effect=["v", "n"]) as mock_get_input:
+            with patch("yaml.safe_dump") as mock_safe_dump:
+                with self.assertRaises(exceptions.CancelExecution):
+                    ask_for_approval([], params_diff, True)
+                self.assertEqual(mock_safe_dump.call_count, 1)
+            self.assertEqual(mock_get_input.call_count, 2)
+
+        self.assertEqual(patched_summarize.call_count, 1)
 
     def test_wait_till_change_set_complete_success(self):
         self.stubber.add_response(
@@ -272,10 +300,12 @@ class TestInteractiveProvider(unittest.TestCase):
             self.provider.update_stack(
                 fqn="my-fake-stack",
                 template_url="http://fake.template.url.com/",
+                old_parameters=[],
                 parameters=[], tags=[]
             )
 
         patched_approval.assert_called_with(full_changeset=changes,
+                                            params_diff=[],
                                             include_verbose=True)
 
         self.assertEqual(patched_approval.call_count, 1)
@@ -303,6 +333,7 @@ class TestInteractiveProvider(unittest.TestCase):
             self.provider.update_stack(
                 fqn="my-fake-stack",
                 template_url="http://fake.template.url.com/",
+                old_parameters=[],
                 parameters=[], tags=[], diff=True
             )
 

@@ -93,6 +93,7 @@ class BaseCommand(object):
         self.add_arguments(parser)
         args = parser.parse_args(*vargs)
         args.environment.update(args.cli_envs)
+        args.environment.update({'region': args.region})
         return args
 
     def run(self, options, **kwargs):

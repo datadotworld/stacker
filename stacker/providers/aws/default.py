@@ -231,7 +231,6 @@ class Provider(BaseProvider):
                 self.cloudformation.update_stack,
                 kwargs=dict(StackName=fqn,
                             TemplateURL=template_url,
-                            OldParameters=old_parameters,
                             Parameters=parameters,
                             Tags=tags,
                             Capabilities=["CAPABILITY_NAMED_IAM"]),

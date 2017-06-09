@@ -64,6 +64,7 @@ class BaseCommand(object):
     logger_type = BASIC_LOGGER_TYPE
 
     def __init__(self, *args, **kwargs):
+        self._logger = None
         if not self.name:
             raise ValueError("Subcommands must set \"name\": %s" % (self,))
 
@@ -93,7 +94,6 @@ class BaseCommand(object):
         self.add_arguments(parser)
         args = parser.parse_args(*vargs)
         args.environment.update(args.cli_envs)
-        args.environment.update({'region': args.region})
         return args
 
     def run(self, options, **kwargs):

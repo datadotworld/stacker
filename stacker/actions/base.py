@@ -57,11 +57,12 @@ class BaseAction(object):
         self.provider = provider
         self.bucket_name = context.bucket_name
         self._conn = None
+        self._s3_conn = None
 
     @property
     def s3_conn(self):
         """The boto s3 connection object used for communication with S3."""
-        if not hasattr(self, "_s3_conn"):
+        if not self._s3_conn:
             session = get_session(self.provider.region)
             self._s3_conn = session.client('s3')
 

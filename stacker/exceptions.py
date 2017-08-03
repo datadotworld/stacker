@@ -1,3 +1,9 @@
+class InvalidConfig(Exception):
+    def __init__(self, errors):
+        super(InvalidConfig, self).__init__(errors)
+        self.errors = errors
+
+
 class InvalidLookupCombination(Exception):
 
     def __init__(self, lookup, lookups, value, *args, **kwargs):

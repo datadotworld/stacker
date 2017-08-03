@@ -5,8 +5,14 @@ import importlib
 import logging
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
+from git import Repo
+
+import botocore.exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +281,6 @@ def cf_safe_name(name):
     return "".join([uppercase_first_letter(part) for part in parts])
 
 
-# TODO: perhaps make this a part of the builder?
 def handle_hooks(stage, hooks, provider, context):
     """ Used to handle pre/post_build hooks.
 
@@ -284,7 +289,8 @@ def handle_hooks(stage, hooks, provider, context):
 
     Args:
         stage (string): The current stage (pre_run, post_run, etc).
-        hooks (list): A list of dictionaries containing the hooks to execute.
+        hooks (list): A list of :class:`stacker.config.Hook` containing the
+            hooks to execute.
         provider (:class:`stacker.provider.base.BaseProvider`): The provider
             the current stack is using.
         context (:class:`stacker.context.Context`): The current stacker
@@ -297,45 +303,45 @@ def handle_hooks(stage, hooks, provider, context):
     hook_paths = []
     for i, h in enumerate(hooks):
         try:
-            hook_paths.append(h["path"])
+            hook_paths.append(h.path)
         except KeyError:
             raise ValueError("%s hook #%d missing path." % (stage, i))
 
     logger.info("Executing %s hooks: %s", stage, ", ".join(hook_paths))
     for hook in hooks:
-        data_key = hook.get("data_key")
-        required = hook.get("required", True)
-        kwargs = hook.get("args", {})
+        data_key = hook.data_key
+        required = hook.required
+        kwargs = hook.args or {}
         try:
-            method = load_object_from_string(hook["path"])
+            method = load_object_from_string(hook.path)
         except (AttributeError, ImportError):
-            logger.exception("Unable to load method at %s:", hook["path"])
+            logger.exception("Unable to load method at %s:", hook.path)
             if required:
                 raise
             continue
         try:
             result = method(context=context, provider=provider, **kwargs)
         except Exception:
-            logger.exception("Method %s threw an exception:", hook["path"])
+            logger.exception("Method %s threw an exception:", hook.path)
             if required:
                 raise
             continue
         if not result:
             if required:
                 logger.error("Required hook %s failed. Return value: %s",
-                             hook["path"], result)
+                             hook.path, result)
                 sys.exit(1)
             logger.warning("Non-required hook %s failed. Return value: %s",
-                           hook["path"], result)
+                           hook.path, result)
         else:
             if isinstance(result, collections.Mapping):
                 if data_key:
                     logger.debug("Adding result for hook %s to context in "
-                                 "data_key %s.", hook["path"], data_key)
+                                 "data_key %s.", hook.path, data_key)
                     context.set_hook_data(data_key, result)
                 else:
                     logger.debug("Hook %s returned result data, but no data "
-                                 "key set, so ignoring.", hook["path"])
+                                 "key set, so ignoring.", hook.path)
 
 
 def get_config_directory():
@@ -366,3 +372,273 @@ def read_value_from_path(value):
         with open(relative_path) as read_file:
             value = read_file.read()
     return value
+
+
+def get_client_region(client):
+    """Gets the region from a :class:`boto3.client.Client` object.
+
+    Args:
+        client (:class:`boto3.client.Client`): The client to get the region
+            from.
+
+    Returns:
+        string: AWS region string.
+    """
+
+    return client._client_config.region_name
+
+
+def get_s3_endpoint(client):
+    """Gets the s3 endpoint for the given :class:`boto3.client.Client` object.
+
+    Args:
+        client (:class:`boto3.client.Client`): The client to get the endpoint
+            from.
+
+    Returns:
+        string: The AWS endpoint for the client.
+    """
+
+    return client._endpoint.host
+
+
+def s3_bucket_location_constraint(region):
+    """Returns the appropriate LocationConstraint info for a new S3 bucket.
+
+    When creating a bucket in a region OTHER than us-east-1, you need to
+    specify a LocationConstraint inside the CreateBucketConfiguration argument.
+    This function helps you determine the right value given a given client.
+
+    Args:
+        region (str): The region where the bucket will be created in.
+
+    Returns:
+        string: The string to use with the given client for creating a bucket.
+    """
+    if region == "us-east-1":
+        return ""
+    return region
+
+
+def ensure_s3_bucket(s3_client, bucket_name, bucket_region):
+    """Ensure an s3 bucket exists, if it does not then create it.
+
+    Args:
+        s3_client (:class:`botocore.client.Client`): An s3 client used to
+            verify and create the bucket.
+        bucket_name (str): The bucket being checked/created.
+        bucket_region (str, optional): The region to create the bucket in. If
+            not provided, will be determined by s3_client's region.
+    """
+    try:
+        s3_client.head_bucket(Bucket=bucket_name)
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Message'] == "Not Found":
+            logger.debug("Creating bucket %s.", bucket_name)
+            create_args = {"Bucket": bucket_name}
+            location_constraint = s3_bucket_location_constraint(
+                bucket_region
+            )
+            if location_constraint:
+                create_args["CreateBucketConfiguration"] = {
+                    "LocationConstraint": location_constraint
+                }
+            s3_client.create_bucket(**create_args)
+        elif e.response['Error']['Message'] == "Forbidden":
+            logger.exception("Access denied for bucket %s.  Did " +
+                             "you remember to use a globally unique name?",
+                             bucket_name)
+            raise
+        else:
+            logger.exception("Error creating bucket %s. Error %s",
+                             bucket_name, e.response)
+            raise
+
+
+class SourceProcessor():
+    """Makes remote python package sources available in the running python
+       environment."""
+
+    def __init__(self, stacker_cache_dir=None):
+        """
+        Processes a config's list of package sources
+
+        Args:
+            stacker_cache_dir (string): Directory of stacker local cache.
+                                        Default to $HOME/.stacker
+        """
+        stacker_cache_dir = (stacker_cache_dir or
+                             os.path.expanduser("~/.stacker"))
+        package_cache_dir = os.path.join(stacker_cache_dir, 'packages')
+        self.stacker_cache_dir = stacker_cache_dir
+        self.package_cache_dir = package_cache_dir
+        self.create_cache_directories()
+
+    def create_cache_directories(self):
+        """Ensures that SourceProcessor cache directories exist."""
+        if not os.path.isdir(self.package_cache_dir):
+            if not os.path.isdir(self.stacker_cache_dir):
+                os.mkdir(self.stacker_cache_dir)
+            os.mkdir(self.package_cache_dir)
+
+    def get_package_sources(self, sources):
+        """Makes remote python packages available for local use
+
+        Example::
+
+            {'git': [
+                {'uri': 'git@github.com:remind101/stacker_blueprints.git',
+                 'tag': '1.0.0',
+                 'paths': ['stacker_blueprints']},
+                {'uri': 'git@github.com:acmecorp/stacker_blueprints.git'},
+                {'uri': 'git@github.com:contoso/webapp.git',
+                 'branch': 'staging'},
+                {'uri': 'git@github.com:contoso/foo.git',
+                 'commit': '12345678'}
+            ]}
+
+        Args:
+            sources (dict): Dictionary of remote sources from config.
+                Currently supports git repositories
+        """
+        # Checkout git repositories specified in config
+        if sources.git:
+            for config in sources.git:
+                self.fetch_git_package(config=config)
+
+    def fetch_git_package(self, config):
+        """Makes a remote git repository available for local use
+
+        Args:
+            config (:class:`stacker.config.GitPackageSource`): git config
+                dictionary
+
+        """
+        ref = self.determine_git_ref(config)
+        dir_name = self.sanitize_git_path(uri=config.uri, ref=ref)
+        cached_dir_path = os.path.join(self.package_cache_dir, dir_name)
+
+        # We can skip cloning the repo if it's already been cached
+        if not os.path.isdir(cached_dir_path):
+            tmp_dir = tempfile.mkdtemp(prefix='stacker')
+            try:
+                tmp_repo_path = os.path.join(tmp_dir, dir_name)
+                with Repo.clone_from(config.uri, tmp_repo_path) as repo:
+                    repo.head.reference = ref
+                    repo.head.reset(index=True, working_tree=True)
+                shutil.move(tmp_repo_path, self.package_cache_dir)
+            finally:
+                shutil.rmtree(tmp_dir)
+
+        # Cloning (if necessary) is complete. Now add the appropriate
+        # directory (or directories) to sys.path
+        if config.paths:
+            for path in config.paths:
+                path_to_append = os.path.join(self.package_cache_dir,
+                                              dir_name,
+                                              path)
+                logger.debug("Appending \"%s\" to python sys.path",
+                             path_to_append)
+                sys.path.append(os.path.join(self.package_cache_dir,
+                                             dir_name,
+                                             path))
+        else:
+            sys.path.append(cached_dir_path)
+
+    def git_ls_remote(self, uri, ref):
+        """Determines the latest commit id for a given ref.
+
+        Args:
+            uri (string): git URI
+            ref (string): git ref
+
+        Returns:
+            str: A commit id
+        """
+        logger.debug("Invoking git to retrieve commit id for repo %s...", uri)
+        lsremote_output = subprocess.check_output(['git',
+                                                   'ls-remote',
+                                                   uri,
+                                                   ref])
+        if "\t" in lsremote_output:
+            commit_id = lsremote_output.split("\t")[0]
+            logger.debug("Matching commit id found: %s", commit_id)
+            return commit_id
+        else:
+            raise ValueError("Ref \"%s\" not found for repo %d." % (ref, uri))
+
+    def determine_git_ls_remote_ref(self, config):
+        """Takes a dict describing a git repo and determines the ref to be used
+           with the "git ls-remote" command
+
+        Args:
+            config (:class:`stacker.config.GitPackageSource`): git config
+                dictionary; 'branch' key is optional
+
+        Returns:
+            str: A branch reference or "HEAD"
+        """
+        if config.branch:
+            ref = "refs/heads/%s" % config.branch
+        else:
+            ref = "HEAD"
+
+        return ref
+
+    def determine_git_ref(self, config):
+        """Takes a dict describing a git repo and determines the ref to be used
+           for 'git checkout'.
+
+        Args:
+            config (:class:`stacker.config.GitPackageSource`): git config
+                dictionary
+
+        Returns:
+            str: A commit id or tag name
+        """
+        # First ensure redundant config keys aren't specified (which could
+        # cause confusion as to which take precedence)
+        ref_config_keys = 0
+        for i in ['commit', 'tag', 'branch']:
+            if config.get(i):
+                ref_config_keys += 1
+        if ref_config_keys > 1:
+            raise ImportError("Fetching remote git sources failed: "
+                              "conflicting revisions (e.g. 'commit', 'tag', "
+                              "'branch') specified for a package source")
+
+        # Now check for a specific point in time referenced and return it if
+        # present
+        if config.commit:
+            ref = config.commit
+        elif config.tag:
+            ref = config.tag
+        else:
+            # Since a specific commit/tag point in time has not been specified,
+            # check the remote repo for the commit id to use
+            ref = self.git_ls_remote(
+                config.uri,
+                self.determine_git_ls_remote_ref(config)
+            )
+        return ref
+
+    def sanitize_git_path(self, uri, ref=None):
+        """Takes a git URI and ref and converts it to a directory safe path
+
+        Args:
+            uri (string): git URI
+                          (e.g. git@github.com:foo/bar.git)
+            ref (string): optional git ref to be appended to the path
+
+        Returns:
+            str: Directory name for the supplied uri
+        """
+        if uri.endswith('.git'):
+            dir_name = uri[:-4]  # drop .git
+        else:
+            dir_name = uri
+        for i in ['@', '/', ':']:
+            dir_name = dir_name.replace(i, '_')
+        if ref is not None:
+            dir_name += "-%s" % ref
+        return dir_name

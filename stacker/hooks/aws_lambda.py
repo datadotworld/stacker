@@ -11,7 +11,10 @@ import formic
 from troposphere.awslambda import Code
 from stacker.session_cache import get_session
 
-from stacker.util import get_config_directory
+from stacker.util import (
+    get_config_directory,
+    ensure_s3_bucket,
+)
 
 
 """Mask to retrieve only UNIX file permissions from the external attributes
@@ -177,35 +180,6 @@ def _head_object(s3_conn, bucket, key):
             raise
 
 
-def _ensure_bucket(s3_conn, bucket):
-    """Create an S3 bucket if it does not already exist.
-
-    Args:
-        s3_conn (botocore.client.S3): S3 connection to use for operations.
-        bucket (str): name of the bucket to create.
-
-    Returns:
-        dict: S3 object information. See the AWS documentation for explanation
-        of the contents.
-
-    Raises:
-        botocore.exceptions.ClientError: any error from boto3 is passed
-            through.
-    """
-    try:
-        s3_conn.head_bucket(Bucket=bucket)
-    except botocore.exceptions.ClientError as e:
-        if e.response['Error']['Code'] == '404':
-            logger.info('Creating bucket %s.', bucket)
-            s3_conn.create_bucket(Bucket=bucket)
-        elif e.response['Error']['Code'] in ('401', '403'):
-            logger.exception('Access denied for bucket %s.', bucket)
-            raise
-        else:
-            logger.exception('Error creating bucket %s. Error %s', bucket,
-                             e.response)
-
-
 def _upload_code(s3_conn, bucket, prefix, name, contents, content_hash):
     """Upload a ZIP file to S3 for use by Lambda.
 
@@ -338,6 +312,32 @@ def _upload_function(s3_conn, bucket, prefix, name, options):
                         content_hash)
 
 
+def select_bucket_region(custom_bucket, hook_region, stacker_bucket_region,
+                         provider_region):
+    """Returns the appropriate region to use when uploading functions.
+
+    Select the appropriate region for the bucket where lambdas are uploaded in.
+
+    Args:
+        custom_bucket (str, None): The custom bucket name provided by the
+            `bucket` kwarg of the aws_lambda hook, if provided.
+        hook_region (str): The contents of the `bucket_region` argument to
+            the hook.
+        stacker_bucket_region (str): The contents of the
+            `stacker_bucket_region` global setting.
+        provider_region (str): The region being used by the provider.
+
+    Returns:
+        str: The appropriate region string.
+    """
+    region = None
+    if custom_bucket:
+        region = hook_region
+    else:
+        region = stacker_bucket_region
+    return region or provider_region
+
+
 def upload_lambda_functions(context, provider, **kwargs):
     """Builds Lambda payloads from user configuration and uploads them to S3.
 
@@ -360,13 +360,19 @@ def upload_lambda_functions(context, provider, **kwargs):
     Keyword Arguments:
         bucket (str, optional): Custom bucket to upload functions to.
             Omitting it will cause the default stacker bucket to be used.
+        bucket_region (str, optional): The region in which the bucket should
+            exist. If not given, the region will be either be that of the
+            global `stacker_bucket_region` setting, or else the region in
+            use by the provider.
         prefix (str, optional): S3 key prefix to prepend to the uploaded
             zip name.
         functions (dict):
             Configurations of desired payloads to build. Keys correspond to
             function names, used to derive key names for the payload. Each
             value should itself be a dictionary, with the following data:
+
                 * path (str):
+
                     Base directory of the Lambda function payload content.
                     If it not an absolute path, it will be considered relative
                     to the directory containing the stacker configuration file
@@ -381,13 +387,16 @@ def upload_lambda_functions(context, provider, **kwargs):
                     this directory. So, for example, all the files contained
                     directly under this directory will be added to the root of
                     the ZIP file.
+
                 * include(str or list[str], optional):
+
                     Pattern or list of patterns of files to include in the
                     payload. If provided, only files that match these
                     patterns will be included in the payload.
 
                     Omitting it is equivalent to accepting all files that are
                     not otherwise excluded.
+
                 * exclude(str or list[str], optional):
                     Pattern or list of patterns of files to exclude from the
                     payload. If provided, any files that match will be ignored,
@@ -438,23 +447,38 @@ def upload_lambda_functions(context, provider, **kwargs):
                         )
                     )
     """
-    bucket = kwargs.get('bucket')
-    if not bucket:
-        bucket = context.bucket_name
-        logger.info('lambda: using default bucket from stacker: %s', bucket)
+    custom_bucket = kwargs.get('bucket')
+    if not custom_bucket:
+        bucket_name = context.bucket_name
+        logger.info("lambda: using default bucket from stacker: %s",
+                    bucket_name)
     else:
-        logger.info('lambda: using custom bucket: %s', bucket)
+        bucket_name = custom_bucket
+        logger.info("lambda: using custom bucket: %s", bucket_name)
+
+    custom_bucket_region = kwargs.get("bucket_region")
+    if not custom_bucket and custom_bucket_region:
+        raise ValueError("Cannot specify `bucket_region` without specifying "
+                         "`bucket`.")
+
+    bucket_region = select_bucket_region(
+        custom_bucket,
+        custom_bucket_region,
+        context.config.stacker_bucket_region,
+        provider.region
+    )
+
+    # Always use the global client for s3
+    session = get_session(bucket_region)
+    s3_client = session.client('s3')
+
+    ensure_s3_bucket(s3_client, bucket_name, bucket_region)
 
     prefix = kwargs.get('prefix', '')
 
-    session = get_session(provider.region)
-    s3_conn = session.client('s3')
-
-    _ensure_bucket(s3_conn, bucket)
-
     results = {}
     for name, options in kwargs['functions'].items():
-        results[name] = _upload_function(s3_conn, bucket, prefix, name,
+        results[name] = _upload_function(s3_client, bucket_name, prefix, name,
                                          options)
 
     return results

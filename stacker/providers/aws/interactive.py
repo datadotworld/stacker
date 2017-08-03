@@ -8,7 +8,11 @@ from .default import (
     retry_on_throttling,
 )
 from ... import exceptions
-from ...actions.diff import diff_parameters
+from ...actions.diff import (
+    DictValue,
+    diff_parameters,
+    format_params_diff as format_diff
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +55,7 @@ def ask_for_approval(full_changeset=None, params_diff=None,
     Args:
         full_changeset (list, optional): A list of the full changeset that will
             be output if the user specifies verbose.
-        params_diff (list, optional): A list of dictionaries detailing the
+        params_diff (list, optional): A list of DictValue detailing the
             differences between two parameters returned by
             :func:`stacker.actions.diff.diff_dictionaries`
         include_verbose (bool, optional): Boolean for whether or not to include
@@ -68,8 +72,8 @@ def ask_for_approval(full_changeset=None, params_diff=None,
     if include_verbose and approve == "v":
         if params_diff:
             logger.info(
-                "Full changeset:\n%s\n%s",
-                summarize_params_diff(params_diff),
+                "Full changeset:\n\n%s\n%s",
+                format_params_diff(params_diff),
                 yaml.safe_dump(full_changeset),
             )
         else:
@@ -126,12 +130,31 @@ def output_summary(fqn, action, changeset, params_diff,
     logger.info('%s %s:\n%s', fqn, action, summary)
 
 
+def format_params_diff(params_diff):
+    """ Just a wrapper for stacker.actions.diff.format_params_diff
+    for testing purposes.
+    """
+    return format_diff(params_diff)
+
+
 def summarize_params_diff(params_diff):
     summary = ''
-    summary_lines = ["%s %s = %s" % (line[0], line[1], line[2])
-                     for line in params_diff if line[0] != ' ']
-    if summary_lines:
-        summary = 'Parameters Changed:\n%s\n' % '\n'.join(summary_lines)
+
+    added_summary = [v.key for v in params_diff
+                     if v.status() is DictValue.ADDED]
+    if added_summary:
+        summary += 'Parameters Added: %s\n' % ', '.join(added_summary)
+
+    removed_summary = [v.key for v in params_diff
+                       if v.status() is DictValue.REMOVED]
+    if removed_summary:
+        summary += 'Parameters Removed: %s\n' % ', '.join(removed_summary)
+
+    modified_summary = [v.key for v in params_diff
+                        if v.status() is DictValue.MODIFIED]
+    if modified_summary:
+        summary += 'Parameters Modified: %s\n' % ', '.join(modified_summary)
+
     return summary
 
 

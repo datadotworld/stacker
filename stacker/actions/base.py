@@ -63,7 +63,6 @@ class BaseAction(object):
         self.provider = provider
         self.bucket_name = context.bucket_name
         self._conn = None
-        self._s3_conn = None
 
     @property
     def s3_conn(self):

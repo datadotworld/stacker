@@ -13,10 +13,12 @@ from moto import mock_s3
 from testfixtures import TempDirectory, ShouldRaise, compare
 
 from stacker.context import Context
+from stacker.config import Config
 from stacker.hooks.aws_lambda import (
     upload_lambda_functions,
     ZIP_PERMS_MASK,
-    _calculate_hash
+    _calculate_hash,
+    select_bucket_region,
 )
 from ..factories import mock_provider
 
@@ -75,8 +77,8 @@ class TestLambdaHooks(unittest.TestCase):
                     self.fail('s3: bucket {} does not exist'.format(bucket))
 
     def setUp(self):
-        self.context = Context(environment={'namespace': 'test'})
-        self.context.bucket_name = 'test'
+        self.context = Context(
+            config=Config({'namespace': 'test', 'stacker_bucket': 'test'}))
         self.provider = mock_provider(region="us-east-1")
 
     def run_hook(self, **kwargs):
@@ -375,3 +377,15 @@ class TestLambdaHooks(unittest.TestCase):
                 hash1 = _calculate_hash(files1, root1)
                 hash2 = _calculate_hash(files2, root2)
                 self.assertEqual(hash1, hash2)
+
+    def test_select_bucket_region(self):
+        tests = (
+            (("myBucket", "us-east-1", "us-west-1", "eu-west-1"), "us-east-1"),
+            (("myBucket", None, "us-west-1", "eu-west-1"), "eu-west-1"),
+            ((None, "us-east-1", "us-west-1", "eu-west-1"), "us-west-1"),
+            ((None, "us-east-1", None, "eu-west-1"), "eu-west-1"),
+
+        )
+
+        for args, result in tests:
+            self.assertEqual(select_bucket_region(*args), result)

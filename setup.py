@@ -1,8 +1,7 @@
 import os
 from setuptools import setup, find_packages
-import glob
 
-VERSION = "1.0.2"
+VERSION = "1.0.4"
 
 src_dir = os.path.dirname(__file__)
 
@@ -12,15 +11,26 @@ install_requires = [
     "PyYAML~=3.11",
     "awacs~=0.6.0",
     "colorama~=0.3.7",
-    "formic~=0.9b"
+    "formic~=0.9b",
+    "gitpython~=2.0",
+    "schematics~=2.0.1"
 ]
 
 tests_require = [
-    "nose~=1.0",
     "mock~=2.0.0",
     "moto~=0.4.30",
     "testfixtures~=4.10.0",
     "coverage~=4.3.4"
+]
+
+setup_requires = [
+    "nose",
+]
+
+scripts = [
+    "scripts/compare_env",
+    "scripts/docker-stacker",
+    "scripts/stacker"
 ]
 
 
@@ -41,8 +51,9 @@ if __name__ == "__main__":
         description="Opinionated AWS CloudFormation Stack manager",
         long_description=read("README.rst"),
         packages=find_packages(),
-        scripts=glob.glob(os.path.join(src_dir, "scripts", "*")),
+        scripts=scripts,
         install_requires=install_requires,
         tests_require=tests_require,
+        setup_requires=setup_requires,
         test_suite="nose.collector",
     )

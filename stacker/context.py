@@ -1,13 +1,13 @@
 import collections
 import logging
-import sys
 
-from .config import parse_config
-from .exceptions import MissingEnvironment
+from stacker.config import Config
 from .stack import Stack
-from .lookups import register_lookup_handler
 
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_NAMESPACE_DELIMITER = "-"
 
 
 def get_fqn(base_fqn, delimiter, name=None):
@@ -34,65 +34,62 @@ class Context(object):
             the environment. Useful for templating.
         stack_names (list): A list of stack_names to operate on. If not passed,
             usually all stacks defined in the config will be operated on.
-        mappings (dict): Used as Cloudformation mappings for the blueprint.
-        config (dict): The configuration being operated on, containing the
-            stack definitions.
+        config (:class:`stacker.config.Config`): The stacker configuration
+            being operated on.
         force_stacks (list): A list of stacks to force work on. Used to work
             on locked stacks.
 
     """
 
-    def __init__(self, environment,  # pylint: disable-msg=too-many-arguments
+    def __init__(self, environment=None,
                  stack_names=None,
-                 mappings=None,
                  config=None,
                  logger_type=None,
                  force_stacks=None):
-        try:
-            self.namespace = environment["namespace"]
-        except KeyError:
-            raise MissingEnvironment(["namespace"])
-
         self.environment = environment
         self.stack_names = stack_names or []
-        self.mappings = mappings or {}
         self.logger_type = logger_type
-        self.namespace_delimiter = "-"
-        self.config = config or {}
+        self.config = config or Config()
         self.force_stacks = force_stacks or []
-        self._base_fqn = self.namespace.replace(".", "-").lower()
-        self.bucket_name = "stacker-%s" % (self.get_fqn(),)
-        self.tags = {
-            'stacker_namespace': self.namespace
-        }
-
         self.hook_data = {}
 
-    def load_config(self, conf_string):
-        self.config = parse_config(conf_string, environment=self.environment)
-        self.mappings = self.config.get("mappings", {})
-        namespace_delimiter = self.config.get("namespace_delimiter", None)
-        if "sys_path" in self.config:
-            logger.debug("Appending %s to sys.path.", self.config["sys_path"])
-            sys.path.append(self.config["sys_path"])
-            logger.debug("sys.path is now %s", sys.path)
-        if namespace_delimiter is not None:
-            self.namespace_delimiter = namespace_delimiter
-        bucket_name = self.config.get("stacker_bucket", None)
-        if bucket_name:
-            self.bucket_name = bucket_name
-        tags = self.config.get("tags", None)
+    @property
+    def namespace(self):
+        return self.config.namespace
+
+    @property
+    def namespace_delimiter(self):
+        delimiter = self.config.namespace_delimiter
+        if delimiter is not None:
+            return delimiter
+        return DEFAULT_NAMESPACE_DELIMITER
+
+    @property
+    def bucket_name(self):
+        return self.config.stacker_bucket \
+                or "stacker-%s" % (self.get_fqn(),)
+
+    @property
+    def tags(self):
+        tags = self.config.tags
         if tags is not None:
-            self.tags = dict([(str(tag_key), str(tag_value)) for tag_key,
-                              tag_value in tags.items()])
-        lookups = self.config.get("lookups", {})
-        for key, handler in lookups.iteritems():
-            register_lookup_handler(key, handler)
+            return tags
+        if self.namespace:
+            return {"stacker_namespace": self.namespace}
+        return {}
+
+    @property
+    def _base_fqn(self):
+        return self.namespace.replace(".", "-").lower()
+
+    @property
+    def mappings(self):
+        return self.config.mappings or {}
 
     def _get_stack_definitions(self):
         if not self.stack_names:
-            return self.config["stacks"]
-        return [s for s in self.config["stacks"] if s["name"] in
+            return self.config.stacks
+        return [s for s in self.config.stacks if s.name in
                 self.stack_names]
 
     def get_stacks(self):
@@ -112,9 +109,9 @@ class Context(object):
                 definition=stack_def,
                 context=self,
                 mappings=self.mappings,
-                force=stack_def["name"] in self.force_stacks,
-                locked=stack_def.get("locked", False),
-                enabled=stack_def.get("enabled", True),
+                force=stack_def.name in self.force_stacks,
+                locked=stack_def.locked,
+                enabled=stack_def.enabled,
             )
             stacks.append(stack)
         return stacks

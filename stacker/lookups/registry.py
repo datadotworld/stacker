@@ -5,7 +5,10 @@ from .handlers import output
 from .handlers import kms
 from .handlers import xref
 from .handlers import ssmstore
+from .handlers import dynamodb
+from .handlers import envvar
 from .handlers import rxref
+from .handlers import ami
 from .handlers import file as file_handler
 from .handlers import split
 from .handlers import default
@@ -72,9 +75,12 @@ def resolve_lookups(lookups, context, provider):
 register_lookup_handler(output.TYPE_NAME, output.handler)
 register_lookup_handler(kms.TYPE_NAME, kms.handler)
 register_lookup_handler(ssmstore.TYPE_NAME, ssmstore.handler)
+register_lookup_handler(envvar.TYPE_NAME, envvar.handler)
 register_lookup_handler(xref.TYPE_NAME, xref.handler)
 register_lookup_handler(rxref.TYPE_NAME, rxref.handler)
+register_lookup_handler(ami.TYPE_NAME, ami.handler)
 register_lookup_handler(file_handler.TYPE_NAME, file_handler.handler)
 register_lookup_handler(split.TYPE_NAME, split.handler)
 register_lookup_handler(default.TYPE_NAME, default.handler)
 register_lookup_handler(hook_data.TYPE_NAME, hook_data.handler)
+register_lookup_handler(dynamodb.TYPE_NAME, dynamodb.handler)

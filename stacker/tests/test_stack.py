@@ -2,7 +2,8 @@ from mock import MagicMock
 import unittest
 
 from stacker.context import Context
-from stacker.stack import _gather_variables, Stack
+from stacker.config import Config
+from stacker.stack import Stack
 from .factories import generate_definition
 
 
@@ -10,7 +11,8 @@ class TestStack(unittest.TestCase):
 
     def setUp(self):
         self.sd = {"name": "test"}
-        self.context = Context({"namespace": "namespace"})
+        self.config = Config({"namespace": "namespace"})
+        self.context = Context(config=self.config)
         self.stack = Stack(
             definition=generate_definition("vpc", 1),
             context=self.context,
@@ -71,8 +73,35 @@ class TestStack(unittest.TestCase):
         param = stack.parameter_values["Param2"]
         self.assertEqual(param, "Some Resolved Value")
 
-    def test_gather_variables_fails_on_parameters_in_stack_def(self):
-        sdef = self.sd
-        sdef["parameters"] = {"Address": "10.0.0.1", "Foo": "BAR"}
-        with self.assertRaises(AttributeError):
-            _gather_variables(sdef)
+    def test_stack_tags_default(self):
+        self.config.tags = {"environment": "prod"}
+        definition = generate_definition(
+            base_name="vpc",
+            stack_id=1
+        )
+        stack = Stack(definition=definition, context=self.context)
+        self.assertEquals(stack.tags, {"environment": "prod"})
+
+    def test_stack_tags_override(self):
+        self.config.tags = {"environment": "prod"}
+        definition = generate_definition(
+            base_name="vpc",
+            stack_id=1,
+            tags={"environment": "stage"}
+        )
+        stack = Stack(definition=definition, context=self.context)
+        self.assertEquals(stack.tags, {"environment": "stage"})
+
+    def test_stack_tags_extra(self):
+        self.config.tags = {"environment": "prod"}
+        definition = generate_definition(
+            base_name="vpc",
+            stack_id=1,
+            tags={"app": "graph"}
+        )
+        stack = Stack(definition=definition, context=self.context)
+        self.assertEquals(stack.tags, {"environment": "prod", "app": "graph"})
+
+
+if __name__ == '__main__':
+    unittest.main()

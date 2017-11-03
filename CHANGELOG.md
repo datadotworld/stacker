@@ -1,3 +1,65 @@
+## 1.1.1 (2017-10-11)
+
+This release is mostly about updating the dependencies for stacker to newer
+versions, since that was missed in the last release.
+
+## 1.1.0 (2017-10-08)
+
+- `--max-zones` removed from CLI [GH-427]
+- Ami lookup: add region specification [GH-433]
+- DynamoDB Lookup [GH-434]
+- Environment file is optional now [GH-436]
+- New functional test suite [GH-439]
+- Structure config object using Schematics [GH-443]
+- S3 endpoint fallback [GH-445]
+- Stack specific tags [GH-450]
+- Allow disabling of stacker bucket (direct CF updates) [GH-451]
+- Uniform deprecation warnings [GH-452]
+- Remote configuration support [GH-458]
+- TroposphereType updates [GH-462]
+- Fix replacements-only issue [GH-464]
+- testutil enhancments to blueprint testing [GH-467]
+- Removal of Interactive Provider (now combined w/ default provider) [GH-469]
+- protected stacks [GH-472]
+- MUCH Better handling of stack rollbacks & recreations [GH-473]
+- follow\_symlinks argument for aws lambda hook [GH-474]
+- Enable service\_role for cloudformation operations [GH-476]
+- Allow setting stack description from config [GH-477]
+- Move S3 templates into sub-directories [GH-478]
+
+## 1.0.4 (2017-07-07)
+
+- Fix issue w/ tail being required (but not existing) on diff/info/etc [GH-429]
+
+## 1.0.3 (2017-07-06)
+
+There was some reworking on how regions are handled, specifically around
+s3 and where the buckets for both stacker and the awslambda lookup are created.
+Now the stacker bucket will default to being created in the region where the
+stacks are being created (ie: from the `--region` argument). If you want to
+have the bucket be in a different region you now can set the
+`stacker_bucket_region` top level config value.
+
+For the awslambda hook, you also have the option of using `bucket_region` as
+an argument, provided you are using a custom `bucket` for the hook. If you
+are not using a custom bucket, then it will use the logic used above.
+
+- add ami lookup [GH-360]
+- Add support for Property objects in TroposphereType variables [GH-379]
+- Add debugging statements to sys.path appending [GH-385]
+- Catch undefined variable value [GH-388]
+- Exponential backoff waiting for AWS changeset to stabilize [GH-389]
+- Add parameter changes to diff output [GH-394]
+- Add CODE\_OF\_CONDUCT.md [GH-399]
+- Add a hint for forbidden bucket access [GH-401]
+- Fix issues w/ "none" as variable values [GH-405]
+- Remove extra '/' in blueprint tests [GH-409]
+- Fix dump provider interaction with lookups [GH-410]
+- Add ssmstore lookup docs [GH-411]
+- Fix issue w/ s3 buckets in different regions [GH-413, GH-417]
+- Disable loop logger whe --tail is provided [GH-414]
+- Add envvar lookup [GH-418]
+
 ## 1.0.2 (2017-05-10)
 
 - fix lambda hook determinism [GH-372]

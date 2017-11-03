@@ -1,8 +1,15 @@
 import copy
 import logging
+import sys
 
 import botocore.exceptions
 from stacker.session_cache import get_session
+from stacker.exceptions import PlanFailed
+
+from stacker.util import (
+    ensure_s3_bucket,
+    get_s3_endpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +24,13 @@ def stack_template_key_name(blueprint):
     Returns:
         string: Key name resulting from blueprint.
     """
-    return "%s-%s.json" % (blueprint.name, blueprint.version)
+    name = blueprint.name
+    return "stack_templates/%s/%s-%s.json" % (blueprint.context.get_fqn(name),
+                                              name,
+                                              blueprint.version)
 
 
-def stack_template_url(bucket_name, blueprint):
+def stack_template_url(bucket_name, blueprint, endpoint):
     """Produces an s3 url for a given blueprint.
 
     Args:
@@ -28,12 +38,13 @@ def stack_template_url(bucket_name, blueprint):
             templates are stored.
         blueprint (:class:`stacker.blueprints.base.Blueprint`): The blueprint
             object to create the URL to.
+        endpoint (string): The s3 endpoint used for the bucket.
 
     Returns:
         string: S3 URL.
     """
     key_name = stack_template_key_name(blueprint)
-    return "https://s3.amazonaws.com/%s/%s" % (bucket_name, key_name)
+    return "%s/%s/%s" % (endpoint, bucket_name, key_name)
 
 
 class BaseAction(object):
@@ -62,30 +73,25 @@ class BaseAction(object):
     def s3_conn(self):
         """The boto s3 connection object used for communication with S3."""
         if not hasattr(self, "_s3_conn"):
-            session = get_session(self.provider.region)
+            # Always use the global client for s3
+            session = get_session(self.bucket_region)
             self._s3_conn = session.client('s3')
 
         return self._s3_conn
 
+    @property
+    def bucket_region(self):
+        return self.context.config.stacker_bucket_region \
+                or self.provider.region
+
     def ensure_cfn_bucket(self):
         """The CloudFormation bucket where templates will be stored."""
-        try:
-            self.s3_conn.head_bucket(Bucket=self.bucket_name)
-        except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Message'] == "Not Found":
-                logger.debug("Creating bucket %s.", self.bucket_name)
-                self.s3_conn.create_bucket(Bucket=self.bucket_name)
-            elif e.response['Error']['Message'] == "Forbidden":
-                logger.exception("Access denied for bucket %s.",
-                                 self.bucket_name)
-                raise
-            else:
-                logger.exception("Error creating bucket %s. Error %s",
-                                 self.bucket_name, e.response)
-                raise
+        ensure_s3_bucket(self.s3_conn, self.bucket_name, self.bucket_region)
 
     def stack_template_url(self, blueprint):
-        return stack_template_url(self.bucket_name, blueprint)
+        return stack_template_url(
+            self.bucket_name, blueprint, get_s3_endpoint(self.s3_conn)
+        )
 
     def s3_stack_push(self, blueprint, force=False):
         """Pushes the rendered blueprint's template to S3.
@@ -120,9 +126,13 @@ class BaseAction(object):
         return template_url
 
     def execute(self, *args, **kwargs):
-        self.pre_run(*args, **kwargs)
-        self.run(*args, **kwargs)
-        self.post_run(*args, **kwargs)
+        try:
+            self.pre_run(*args, **kwargs)
+            self.run(*args, **kwargs)
+            self.post_run(*args, **kwargs)
+        except PlanFailed as e:
+            logger.error(e.message)
+            sys.exit(1)
 
     def pre_run(self, *args, **kwargs):
         pass

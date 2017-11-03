@@ -134,9 +134,10 @@ def validate_variable_type(var_name, var_type, value):
             raise ValidatorError(var_name, name, value, exc)
     else:
         if not isinstance(value, var_type):
-            raise ValueError("Variable %s must be of type %s or is missing"
-                             " from your config with no blueprint default set."
-                             % (var_name, var_type))
+            raise ValueError(
+                "Value for variable %s must be of type %s. Actual "
+                "type: %s." % (var_name, var_type, type(value))
+            )
 
     return value
 
@@ -196,8 +197,8 @@ def resolve_variable(var_name, var_def, provided_variable, blueprint_name):
     if provided_variable:
         if not provided_variable.resolved:
             raise UnresolvedVariable(blueprint_name, provided_variable)
-        if provided_variable.value is not None:
-            value = provided_variable.value
+
+        value = provided_variable.value
     else:
         # Variable value not provided, try using the default, if it exists
         # in the definition
@@ -291,18 +292,23 @@ class Blueprint(object):
 
     """
 
-    def __init__(self, name, context, mappings=None):
+    def __init__(self, name, context, mappings=None, description=None):
         self.name = name
         self.context = context
         self.mappings = mappings
         self.outputs = {}
         self.reset_template()
         self.resolved_variables = None
+        self.description = description
 
         if hasattr(self, "PARAMETERS") or hasattr(self, "LOCAL_PARAMETERS"):
-            raise AttributeError("Blueprint %s uses deprecated PARAMETERS or "
+            raise AttributeError("DEPRECATION WARNING: Blueprint %s uses "
+                                 "deprecated PARAMETERS or "
                                  "LOCAL_PARAMETERS, rather than VARIABLES. "
-                                 "Please update your blueprints." % name)
+                                 "Please update your blueprints. See https://"
+                                 "stacker.readthedocs.io/en/latest/blueprints."
+                                 "html#variables for aditional information."
+                                 % name)
 
     def get_required_parameter_definitions(self):
         """Returns all template parameters that do not have a default value.
@@ -456,6 +462,8 @@ class Blueprint(object):
         """Render the Blueprint to a CloudFormation template"""
         self.import_mappings()
         self.create_template()
+        if self.description:
+            self.set_template_description(self.description)
         self.setup_parameters()
         rendered = self.template.to_json()
         version = hashlib.md5(rendered).hexdigest()[:8]
@@ -477,6 +485,16 @@ class Blueprint(object):
         variables = self.get_variables()
 
         return parse_user_data(variables, raw_user_data, self.name)
+
+    def set_template_description(self, description):
+        """Adds a description to the Template
+
+        Args:
+            description (str): A description to be added to the resulting
+                template.
+
+        """
+        self.template.add_description(description)
 
     @property
     def rendered(self):

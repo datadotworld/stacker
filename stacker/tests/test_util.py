@@ -4,9 +4,24 @@ import string
 import os
 import Queue
 
+import mock
+
+import boto3
+
+from stacker.config import Hook, GitPackageSource
 from stacker.util import (
-    cf_safe_name, load_object_from_string,
-    camel_to_snake, handle_hooks, retry_with_backoff)
+    cf_safe_name,
+    load_object_from_string,
+    camel_to_snake,
+    handle_hooks,
+    merge_map,
+    yaml_to_ordered_dict,
+    retry_with_backoff,
+    get_client_region,
+    get_s3_endpoint,
+    s3_bucket_location_constraint,
+    SourceProcessor
+)
 
 from .factories import (
     mock_context,
@@ -16,6 +31,11 @@ from .factories import (
 regions = ["us-east-1", "cn-north-1", "ap-northeast-1", "eu-west-1",
            "ap-southeast-1", "ap-southeast-2", "us-west-2", "us-gov-west-1",
            "us-west-1", "eu-central-1", "sa-east-1"]
+
+
+def mock_create_cache_directories(self, **kwargs):
+    # Don't actually need the directories created in testing
+    return 1
 
 
 class TestUtil(unittest.TestCase):
@@ -47,6 +67,155 @@ class TestUtil(unittest.TestCase):
         )
         for t in tests:
             self.assertEqual(camel_to_snake(t[0]), t[1])
+
+    def test_merge_map(self):
+        tests = [
+            # 2 lists of stacks defined
+            [{'stacks': [{'stack1': {'variables': {'a': 'b'}}}]},
+             {'stacks': [{'stack2': {'variables': {'c': 'd'}}}]},
+             {'stacks': [
+                 {'stack1': {
+                     'variables': {
+                         'a': 'b'}}},
+                 {'stack2': {
+                     'variables': {
+                         'c': 'd'}}}]}],
+            # A list of stacks combined with a higher precedence dict of stacks
+            [{'stacks': [{'stack1': {'variables': {'a': 'b'}}}]},
+             {'stacks': {'stack2': {'variables': {'c': 'd'}}}},
+             {'stacks': {'stack2': {'variables': {'c': 'd'}}}}],
+            # 2 dicts of stacks with non-overlapping variables merged
+            [{'stacks': {'stack1': {'variables': {'a': 'b'}}}},
+             {'stacks': {'stack1': {'variables': {'c': 'd'}}}},
+             {'stacks': {
+                 'stack1': {
+                     'variables': {
+                         'a': 'b',
+                         'c': 'd'}}}}],
+            # 2 dicts of stacks with overlapping variables merged
+            [{'stacks': {'stack1': {'variables': {'a': 'b'}}}},
+             {'stacks': {'stack1': {'variables': {'a': 'c'}}}},
+             {'stacks': {'stack1': {'variables': {'a': 'c'}}}}],
+        ]
+        for t in tests:
+            self.assertEqual(merge_map(t[0], t[1]), t[2])
+
+    def test_yaml_to_ordered_dict(self):
+        raw_config = """
+        pre_build:
+          hook2:
+            path: foo.bar
+          hook1:
+            path: foo1.bar1
+        """
+        config = yaml_to_ordered_dict(raw_config)
+        self.assertEqual(config['pre_build'].keys()[0], 'hook2')
+        self.assertEqual(config['pre_build']['hook2']['path'], 'foo.bar')
+
+    def test_get_client_region(self):
+        regions = ["us-east-1", "us-west-1", "eu-west-1", "sa-east-1"]
+        for region in regions:
+            client = boto3.client("s3", region_name=region)
+            self.assertEqual(get_client_region(client), region)
+
+    def test_get_s3_endpoint(self):
+        endpoint_map = {
+            "us-east-1": "https://s3.amazonaws.com",
+            "us-west-1": "https://s3-us-west-1.amazonaws.com",
+            "eu-west-1": "https://s3-eu-west-1.amazonaws.com",
+            "sa-east-1": "https://s3-sa-east-1.amazonaws.com",
+        }
+
+        for region in endpoint_map:
+            client = boto3.client("s3", region_name=region)
+            self.assertEqual(get_s3_endpoint(client), endpoint_map[region])
+
+    def test_s3_bucket_location_constraint(self):
+        tests = (
+            ("us-east-1", ""),
+            ("us-west-1", "us-west-1")
+        )
+        for region, result in tests:
+            self.assertEqual(
+                s3_bucket_location_constraint(region),
+                result
+            )
+
+    def test_SourceProcessor_helpers(self):
+        with mock.patch.object(SourceProcessor,
+                               'create_cache_directories',
+                               new=mock_create_cache_directories):
+            sp = SourceProcessor(sources={})
+
+            self.assertEqual(
+                sp.sanitize_git_path('git@github.com:foo/bar.git'),
+                'git_github.com_foo_bar'
+            )
+            self.assertEqual(
+                sp.sanitize_git_path('git@github.com:foo/bar.git', 'v1'),
+                'git_github.com_foo_bar-v1'
+            )
+
+            for i in [GitPackageSource({'branch': 'foo'}), {'branch': 'foo'}]:
+                self.assertEqual(
+                    sp.determine_git_ls_remote_ref(i),
+                    'refs/heads/foo'
+                )
+            for i in [{'uri': 'git@foo'}, {'tag': 'foo'}, {'commit': '1234'}]:
+                self.assertEqual(
+                    sp.determine_git_ls_remote_ref(GitPackageSource(i)),
+                    'HEAD'
+                )
+                self.assertEqual(
+                    sp.determine_git_ls_remote_ref(i),
+                    'HEAD'
+                )
+
+            self.assertEqual(
+                sp.git_ls_remote('https://github.com/remind101/stacker.git',
+                                 'refs/heads/release-1.0'),
+                '857b4834980e582874d70feef77bb064b60762d1'
+            )
+
+            bad_configs = [{'uri': 'x',
+                            'commit': '1234',
+                            'tag': 'v1',
+                            'branch': 'x'},
+                           {'uri': 'x', 'commit': '1234', 'tag': 'v1'},
+                           {'uri': 'x', 'commit': '1234', 'branch': 'x'},
+                           {'uri': 'x', 'tag': 'v1', 'branch': 'x'},
+                           {'uri': 'x', 'commit': '1234', 'branch': 'x'}]
+            for i in bad_configs:
+                with self.assertRaises(ImportError):
+                    sp.determine_git_ref(GitPackageSource(i))
+                with self.assertRaises(ImportError):
+                    sp.determine_git_ref(i)
+
+            self.assertEqual(
+                sp.determine_git_ref(
+                    GitPackageSource({'uri': 'https://github.com/remind101/'
+                                             'stacker.git',
+                                      'branch': 'release-1.0'})),
+                '857b4834980e582874d70feef77bb064b60762d1'
+            )
+            self.assertEqual(
+                sp.determine_git_ref(
+                    GitPackageSource({'uri': 'git@foo', 'commit': '1234'})),
+                '1234'
+            )
+            self.assertEqual(
+                sp.determine_git_ref({'uri': 'git@foo', 'commit': '1234'}),
+                '1234'
+            )
+            self.assertEqual(
+                sp.determine_git_ref(
+                    GitPackageSource({'uri': 'git@foo', 'tag': 'v1.0.0'})),
+                'v1.0.0'
+            )
+            self.assertEqual(
+                sp.determine_git_ref({'uri': 'git@foo', 'tag': 'v1.0.0'}),
+                'v1.0.0'
+            )
 
 
 hook_queue = Queue.Queue()
@@ -85,7 +254,7 @@ class TestHooks(unittest.TestCase):
         self.assertTrue(hook_queue.empty())
 
     def test_missing_required_hook(self):
-        hooks = [{"path": "not.a.real.path", "required": True}]
+        hooks = [Hook({"path": "not.a.real.path", "required": True})]
         with self.assertRaises(ImportError):
             handle_hooks("missing", hooks, self.provider, self.context)
 
@@ -95,18 +264,19 @@ class TestHooks(unittest.TestCase):
             handle_hooks("missing", hooks, self.provider, self.context)
 
     def test_missing_non_required_hook_method(self):
-        hooks = [{"path": "stacker.hooks.blah", "required": False}]
+        hooks = [Hook({"path": "stacker.hooks.blah", "required": False})]
         handle_hooks("missing", hooks, self.provider, self.context)
         self.assertTrue(hook_queue.empty())
 
     def test_default_required_hook(self):
-        hooks = [{"path": "stacker.hooks.blah"}]
+        hooks = [Hook({"path": "stacker.hooks.blah"})]
         with self.assertRaises(AttributeError):
             handle_hooks("missing", hooks, self.provider, self.context)
 
     def test_valid_hook(self):
-        hooks = [{"path": "stacker.tests.test_util.mock_hook",
-                  "required": True}]
+        hooks = [
+            Hook({"path": "stacker.tests.test_util.mock_hook",
+                  "required": True})]
         handle_hooks("missing", hooks, self.provider, self.context)
         good = hook_queue.get_nowait()
         self.assertEqual(good["provider"].region, "us-east-1")
@@ -114,34 +284,37 @@ class TestHooks(unittest.TestCase):
             hook_queue.get_nowait()
 
     def test_context_provided_to_hook(self):
-        hooks = [{"path": "stacker.tests.test_util.context_hook",
-                  "required": True}]
+        hooks = [
+            Hook({"path": "stacker.tests.test_util.context_hook",
+                  "required": True})]
         handle_hooks("missing", hooks, "us-east-1", self.context)
 
     def test_hook_failure(self):
-        hooks = [{"path": "stacker.tests.test_util.fail_hook",
-                  "required": True}]
+        hooks = [
+            Hook({"path": "stacker.tests.test_util.fail_hook",
+                  "required": True})]
         with self.assertRaises(SystemExit):
             handle_hooks("fail", hooks, self.provider, self.context)
         hooks = [{"path": "stacker.tests.test_util.exception_hook",
                   "required": True}]
         with self.assertRaises(Exception):
             handle_hooks("fail", hooks, self.provider, self.context)
-        hooks = [{"path": "stacker.tests.test_util.exception_hook",
-                  "required": False}]
+        hooks = [
+            Hook({"path": "stacker.tests.test_util.exception_hook",
+                  "required": False})]
         # Should pass
         handle_hooks("ignore_exception", hooks, self.provider, self.context)
 
     def test_return_data_hook(self):
         hooks = [
-            {
+            Hook({
                 "path": "stacker.tests.test_util.result_hook",
                 "data_key": "my_hook_results"
-            },
+            }),
             # Shouldn't return data
-            {
+            Hook({
                 "path": "stacker.tests.test_util.context_hook"
-            }
+            })
         ]
         handle_hooks("result", hooks, "us-east-1", self.context)
 
@@ -156,14 +329,14 @@ class TestHooks(unittest.TestCase):
 
     def test_return_data_hook_duplicate_key(self):
         hooks = [
-            {
+            Hook({
                 "path": "stacker.tests.test_util.result_hook",
                 "data_key": "my_hook_results"
-            },
-            {
+            }),
+            Hook({
                 "path": "stacker.tests.test_util.result_hook",
                 "data_key": "my_hook_results"
-            }
+            })
         ]
 
         with self.assertRaises(KeyError):

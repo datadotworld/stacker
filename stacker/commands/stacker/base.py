@@ -99,7 +99,11 @@ class BaseCommand(object):
         pass
 
     def configure(self, options, **kwargs):
-        self.logger_type = setup_logging(options.verbose, options.interactive)
+        self.logger_type = setup_logging(
+            options.verbose,
+            interactive=options.interactive,
+            tail=getattr(options, "tail", False)
+        )
 
     def get_context_kwargs(self, options, **kwargs):
         """Return a dictionary of kwargs that will be used with the Context.
@@ -132,17 +136,17 @@ class BaseCommand(object):
             "-v", "--verbose", action="count", default=0,
             help="Increase output verbosity. May be specified up to twice.")
         parser.add_argument(
-            "environment", type=environment_file, default={},
+            "environment", type=environment_file, nargs='?', default={},
             help="Path to a simple `key: value` pair environment file. The "
                  "values in the environment file can be used in the stack "
                  "config as if it were a string.Template type: "
                  "https://docs.python.org/2/library/"
-                 "string.html#template-strings. Must define at least a "
-                 "\"namespace\".")
+                 "string.html#template-strings.")
         parser.add_argument(
             "config", type=argparse.FileType(),
             help="The config file where stack configuration is located. Must "
-                 "be in yaml format.")
+                 "be in yaml format. If `-` is provided, then the config will "
+                 "be read from stdin.")
         parser.add_argument(
             "-i", "--interactive", action="store_true",
             help="Enable interactive mode. If specified, this will use the "
@@ -155,3 +159,7 @@ class BaseCommand(object):
             "--replacements-only", action="store_true",
             help="If interactive mode is enabled, stacker will only prompt to "
                  "authorize replacements.")
+        parser.add_argument(
+            "--recreate-failed", action="store_true",
+            help="Destroy and re-create stacks that are stuck in a failed "
+                 "state from an initial deployment when updating.")

@@ -35,10 +35,13 @@ Thumbs.db
 
 # Vagrant
 .vagrant
+Vagrantfile
 
 # Editor crap
 *.sw*
 *~
+.idea
+*.iml
 
 # Byte-compiled python
 *.pyc
@@ -60,7 +63,7 @@ dist/
 # nosetest --with-coverage dumps these in CWD
 .coverage
 
-Vagrantfile
+
 
 vm_setup.sh
 

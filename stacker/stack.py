@@ -38,12 +38,7 @@ def _gather_variables(stack_def):
             attribute. Currently only when using old parameters, rather than
             variables.
     """
-    stack_name = stack_def["name"]
-    if "parameters" in stack_def:
-        raise AttributeError("Stack definition %s contains deprecated "
-                             "'parameters', rather than 'variables'. Please "
-                             "update your config." % stack_name)
-    variable_values = copy.deepcopy(stack_def.get('variables', {}))
+    variable_values = copy.deepcopy(stack_def.variables or {})
     return [Variable(k, v) for k, v in variable_values.iteritems()]
 
 
@@ -52,7 +47,7 @@ class Stack(object):
     """Represents gathered information about a stack to be built/updated.
 
     Args:
-        definition (dict): A stack definition.
+        definition (:class:`stacker.config.Stack`): A stack definition.
         context (:class:`stacker.context.Context`): Current context for
             building the stack.
         mappings (dict, optional): Cloudformation mappings passed to the
@@ -64,8 +59,8 @@ class Stack(object):
     """
 
     def __init__(self, definition, context, variables=None, mappings=None,
-                 locked=False, force=False, enabled=True):
-        self.name = definition["name"]
+                 locked=False, force=False, enabled=True, protected=False):
+        self.name = definition.name
         self.fqn = context.get_fqn(self.name)
         self.definition = definition
         self.variables = _gather_variables(definition)
@@ -73,6 +68,7 @@ class Stack(object):
         self.locked = locked
         self.force = force
         self.enabled = enabled
+        self.protected = protected
         self.context = copy.deepcopy(context)
 
     def __repr__(self):
@@ -81,7 +77,7 @@ class Stack(object):
     @property
     def requires(self):
         requires = set([self.context.get_fqn(r) for r in
-                        self.definition.get("requires", [])])
+                        self.definition.requires or []])
 
         # Add any dependencies based on output lookups
         for variable in self.variables:
@@ -107,7 +103,7 @@ class Stack(object):
     @property
     def blueprint(self):
         if not hasattr(self, "_blueprint"):
-            class_path = self.definition["class_path"]
+            class_path = self.definition.class_path
             blueprint_class = util.load_object_from_string(class_path)
             if not hasattr(blueprint_class, "rendered"):
                 raise AttributeError("Stack class %s does not have a "
@@ -117,8 +113,22 @@ class Stack(object):
                 name=self.name,
                 context=self.context,
                 mappings=self.mappings,
+                description=self.definition.description,
             )
         return self._blueprint
+
+    @property
+    def tags(self):
+        """Returns the tags that should be set on this stack. Includes both the
+        global tags, as well as any stack specific tags or overrides.
+
+        Returns:
+
+            dict: dictionary of tags
+
+        """
+        tags = self.definition.tags or {}
+        return dict(self.context.tags, **tags)
 
     @property
     def parameter_values(self):

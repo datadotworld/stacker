@@ -1,3 +1,14 @@
+from troposphere import GetAtt, Output, Sub, Ref
+from troposphere import iam
+
+from awacs.aws import Policy, Statement
+import awacs
+import awacs.s3
+import awacs.cloudformation
+import awacs.iam
+
+from troposphere.cloudformation import WaitCondition, WaitConditionHandle
+
 from stacker.blueprints.base import Blueprint
 from stacker.blueprints.variables.types import (
     CFNCommaDelimitedList,
@@ -8,6 +19,148 @@ from stacker.blueprints.variables.types import (
     EC2SubnetIdList,
     EC2VPCId,
 )
+
+
+class FunctionalTests(Blueprint):
+    """This creates a stack with an IAM user and access key for running the
+    functional tests for stacker.
+    """
+
+    VARIABLES = {
+        "StackerNamespace": {
+            "type": CFNString,
+            "description": "The stacker namespace that the tests will use. "
+                           "Access to cloudformation will be restricted to "
+                           "only allow access to stacks with this prefix."},
+        "StackerBucket": {
+            "type": CFNString,
+            "description": "The name of the bucket that the tests will use "
+                           "for uploading templates."}
+    }
+
+    def create_template(self):
+        t = self.template
+
+        bucket_arn = Sub("arn:aws:s3:::${StackerBucket}*")
+        cloudformation_scope = Sub(
+            "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:"
+            "stack/${StackerNamespace}-*")
+        changeset_scope = "*"
+
+        # This represents the precise IAM permissions that stacker itself
+        # needs.
+        stacker_policy = iam.Policy(
+            PolicyName="Stacker",
+            PolicyDocument=Policy(
+                Statement=[
+                    Statement(
+                        Effect="Allow",
+                        Resource=[bucket_arn],
+                        Action=[
+                            awacs.s3.ListBucket,
+                            awacs.s3.GetBucketLocation,
+                            awacs.s3.CreateBucket]),
+                    Statement(
+                        Effect="Allow",
+                        Resource=[bucket_arn],
+                        Action=[
+                            awacs.s3.GetObject,
+                            awacs.s3.GetObjectAcl,
+                            awacs.s3.PutObject,
+                            awacs.s3.PutObjectAcl]),
+                    Statement(
+                        Effect="Allow",
+                        Resource=[changeset_scope],
+                        Action=[
+                            awacs.cloudformation.DescribeChangeSet,
+                            awacs.cloudformation.ExecuteChangeSet,
+                        ]),
+                    Statement(
+                        Effect="Deny",
+                        Resource=[Ref("AWS::StackId")],
+                        Action=[
+                            awacs.cloudformation.Action("*")]),
+                    Statement(
+                        Effect="Allow",
+                        Resource=[cloudformation_scope],
+                        Action=[
+                            awacs.cloudformation.GetTemplate,
+                            awacs.cloudformation.CreateChangeSet,
+                            awacs.cloudformation.DeleteStack,
+                            awacs.cloudformation.CreateStack,
+                            awacs.cloudformation.UpdateStack,
+                            awacs.cloudformation.DescribeStacks])]))
+
+        user = t.add_resource(
+            iam.User(
+                "FunctionalTestUser",
+                Policies=[
+                    stacker_policy]))
+
+        key = t.add_resource(
+            iam.AccessKey(
+                "FunctionalTestKey",
+                Serial=1,
+                UserName=Ref(user)))
+
+        t.add_output(Output("User", Value=Ref(user)))
+        t.add_output(Output("AccessKeyId", Value=Ref(key)))
+        t.add_output(
+            Output(
+                "SecretAccessKey",
+                Value=GetAtt("FunctionalTestKey", "SecretAccessKey")))
+
+
+class Dummy(Blueprint):
+    VARIABLES = {
+        "StringVariable": {
+            "type": str,
+            "default": ""}
+    }
+
+    def create_template(self):
+        self.template.add_resource(WaitConditionHandle("Dummy"))
+        self.template.add_output(Output("DummyId", Value="dummy-1234"))
+
+
+class Dummy2(Blueprint):
+    """
+    This blueprint allows tests of only additional resources to occur.
+    Just swap out the Dummy class for Dummy2 on the same stack.
+    """
+    VARIABLES = {
+        "StringVariable": {
+            "type": str,
+            "default": ""}
+    }
+
+    def create_template(self):
+        self.template.add_resource(WaitConditionHandle("Dummy"))
+        self.template.add_output(Output("DummyId", Value="dummy-1234"))
+        self.template.add_resource(WaitConditionHandle("Dummy2"))
+
+
+class Broken(Blueprint):
+    """
+    This blueprint deliberately fails validation, so that it can be used to
+    test re-creation of a failed stack
+    """
+    VARIABLES = {
+        "StringVariable": {
+            "type": str,
+            "default": ""}
+    }
+
+    def create_template(self):
+        t = self.template
+        t.add_resource(WaitConditionHandle("BrokenDummy"))
+        t.add_resource(WaitCondition(
+            "BrokenWaitCondition",
+            Handle=Ref("BrokenDummy"),
+            # Timeout is made deliberately large so CF rejects it
+            Timeout=2 ** 32,
+            Count=0))
+        t.add_output(Output("DummyId", Value="dummy-1234"))
 
 
 class VPC(Blueprint):
@@ -30,8 +183,6 @@ class VPC(Blueprint):
             "type": CFNString,
             "description": "NAT EC2 instance type.",
             "default": "m3.medium"},
-        "SshKeyName": {
-            "type": EC2KeyPairKeyName},
         "BaseDomain": {
             "type": CFNString,
             "default": "",
@@ -58,7 +209,7 @@ class VPC(Blueprint):
     }
 
     def create_template(self):
-        return
+        self.template.add_resource(WaitConditionHandle("VPC"))
 
 
 class Bastion(Blueprint):

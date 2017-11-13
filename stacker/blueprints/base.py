@@ -465,9 +465,9 @@ class Blueprint(object):
         if self.description:
             self.set_template_description(self.description)
         self.setup_parameters()
-        rendered = self.template.to_json()
+        rendered = self.template.to_json(indent=self.context.template_indent)
         version = hashlib.md5(rendered).hexdigest()[:8]
-        return (version, rendered)
+        return version, rendered
 
     def read_user_data(self, user_data_path):
         """Reads and parses a user_data file.

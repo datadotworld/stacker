@@ -343,8 +343,6 @@ class Plan(OrderedDict):
         steps = 1
         logger.info("Dumping \"%s\"...", self.description)
         directory = os.path.expanduser(directory)
-        if not os.path.exists(directory):
-            os.makedirs(directory)
 
         while not self.completed:
             step_name, step = self.list_pending()[0]
@@ -355,6 +353,10 @@ class Plan(OrderedDict):
             blueprint = step.stack.blueprint
             filename = stack_template_key_name(blueprint)
             path = os.path.join(directory, filename)
+            full_dirname = os.path.dirname(path)
+            if not os.path.exists(full_dirname):
+                os.makedirs(full_dirname)
+
             logger.info("Writing stack \"%s\" -> %s", step_name, path)
             with open(path, "w") as f:
                 f.write(blueprint.rendered)

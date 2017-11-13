@@ -300,7 +300,6 @@ class Blueprint(object):
         self.reset_template()
         self.resolved_variables = None
         self.description = description
-        self.indent = 4
 
         if hasattr(self, "PARAMETERS") or hasattr(self, "LOCAL_PARAMETERS"):
             raise AttributeError("DEPRECATION WARNING: Blueprint %s uses "
@@ -466,7 +465,7 @@ class Blueprint(object):
         if self.description:
             self.set_template_description(self.description)
         self.setup_parameters()
-        rendered = self.template.to_json(indent=self.indent)
+        rendered = self.template.to_json(indent=self.context.template_indent)
         version = hashlib.md5(rendered).hexdigest()[:8]
         return version, rendered
 

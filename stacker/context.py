@@ -69,7 +69,7 @@ class Context(object):
     def template_indent(self):
         indent = self.config.template_indent
         if indent is not None:
-            return indent
+            return int(indent)
         return DEFAULT_TEMPLATE_INDENT
 
     @property

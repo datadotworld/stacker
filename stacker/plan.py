@@ -343,8 +343,6 @@ class Plan(OrderedDict):
         steps = 1
         logger.info("Dumping \"%s\"...", self.description)
         directory = os.path.expanduser(directory)
-        if not os.path.exists(directory):
-            os.makedirs(directory)
 
         while not self.completed:
             step_name, step = self.list_pending()[0]

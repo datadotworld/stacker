@@ -20,6 +20,10 @@ from stacker.util import (
     get_client_region,
     get_s3_endpoint,
     s3_bucket_location_constraint,
+    Extractor,
+    TarExtractor,
+    TarGzipExtractor,
+    ZipExtractor,
     SourceProcessor
 )
 
@@ -121,9 +125,9 @@ class TestUtil(unittest.TestCase):
     def test_get_s3_endpoint(self):
         endpoint_map = {
             "us-east-1": "https://s3.amazonaws.com",
-            "us-west-1": "https://s3-us-west-1.amazonaws.com",
-            "eu-west-1": "https://s3-eu-west-1.amazonaws.com",
-            "sa-east-1": "https://s3-sa-east-1.amazonaws.com",
+            "us-west-1": "https://s3.us-west-1.amazonaws.com",
+            "eu-west-1": "https://s3.eu-west-1.amazonaws.com",
+            "sa-east-1": "https://s3.sa-east-1.amazonaws.com",
         }
 
         for region in endpoint_map:
@@ -141,6 +145,15 @@ class TestUtil(unittest.TestCase):
                 result
             )
 
+    def test_extractors(self):
+        self.assertEqual(Extractor('test.zip').archive, 'test.zip')
+        self.assertEqual(TarExtractor().extension(), '.tar')
+        self.assertEqual(TarGzipExtractor().extension(), '.tar.gz')
+        self.assertEqual(ZipExtractor().extension(), '.zip')
+        for i in [TarExtractor(), ZipExtractor(), ZipExtractor()]:
+            i.set_archive('/tmp/foo')
+            self.assertEqual(i.archive.endswith(i.extension()), True)
+
     def test_SourceProcessor_helpers(self):
         with mock.patch.object(SourceProcessor,
                                'create_cache_directories',
@@ -150,6 +163,10 @@ class TestUtil(unittest.TestCase):
             self.assertEqual(
                 sp.sanitize_git_path('git@github.com:foo/bar.git'),
                 'git_github.com_foo_bar'
+            )
+            self.assertEqual(
+                sp.sanitize_uri_path('http://example.com/foo/bar.gz@1'),
+                'http___example.com_foo_bar.gz_1'
             )
             self.assertEqual(
                 sp.sanitize_git_path('git@github.com:foo/bar.git', 'v1'),

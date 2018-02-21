@@ -1,3 +1,37 @@
+## Upcoming/Master
+
+
+## 1.1.4 (2018-01-26)
+
+- Add `blueprint.to_json` for standalone rendering [GH-459]
+- Add global config for troposphere template indent [GH-505]
+- Add serverless transform/CREATE changeset types [GH-517]
+
+## 1.1.3 (2017-12-23)
+
+Bugfix release- primarily to deal with a bug that's been around since the
+introduction of interactive mode/changesets. The bug primarily deals with the
+fact that we weren't deleting Changesets that were not submitted. This didn't
+affect anyone for the longest time, but recently people have started to hit
+limits on the # of changesets in an account. The current thinking is that the
+limits weren't enforced before, and only recently has been enforced.
+
+- Add S3 remote package sources [GH-487]
+- Make blueprint dump always create intermediate directories [GH-499]
+- Allow duplicate keys for most config mappings except `stacks` [GH-507]
+- Remove un-submitted changesets [GH-513]
+
+## 1.1.2 (2017-11-01)
+
+This is a minor update to help deal with some of the issues between `stacker`
+and `stacker_blueprints` both having dependencies on `troposphere`. It loosens
+the dependencies, allowing stacker to work with any reasonably new version
+of troposphere (anything greater than `1.9.0`). `stacker_blueprints` will
+likely require newer versions of troposphere, as new types are introduced to
+the blueprints, but it's unlikely we'll change the `troposphere` version string
+for stacker, since it relies on only the most basic parts of the `troposphere`
+API.
+
 ## 1.1.1 (2017-10-11)
 
 This release is mostly about updating the dependencies for stacker to newer

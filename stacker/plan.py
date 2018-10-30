@@ -331,8 +331,6 @@ class Plan(object):
     def dump(self, directory, context, provider=None):
         logger.info("Dumping \"%s\"...", self.description)
         directory = os.path.expanduser(directory)
-        if not os.path.exists(directory):
-            os.makedirs(directory)
 
         def walk_func(step):
             step.stack.resolve(

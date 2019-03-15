@@ -56,6 +56,7 @@ Contents:
    lookups
    commands
    blueprints
+   templates
    API Docs <api/modules>
 
 
@@ -69,4 +70,4 @@ Indices and tables
 
 .. _Remind: http://www.remind.com/
 .. _troposphere: https://github.com/cloudtools/troposphere
-.. _stacker_blueprints: https://github.com/remind101/stacker_blueprints
+.. _stacker_blueprints: https://github.com/cloudtools/stacker_blueprints

@@ -1,4 +1,107 @@
-## Upcoming/Master
+## Upcoming release
+
+## 1.6.0 (2019-01-21)
+
+- New lookup format/syntax, making it more generic [GH-665]
+- Allow lowercase y/Y when prompted [GH-674]
+- Local package sources [GH-677]
+- Add `in_progress` option to stack config [GH-678]
+- Use default ACL for uploaded lambda code [GH-682]
+- Display rollback reason after error [GH-687]
+- ssm parameter types [GH-692]
+
+## 1.5.0 (2018-10-14)
+
+The big feature in this release is the introduction of "targets" which act as
+sort of "virtual nodes" in the graph. It provides a nice way to logically group
+stacks.
+
+- Add support for "targets" [GH-572]
+- Fix non-interactive changeset updates w/ stack policies [GH-657]
+- Fix interactive_update_stack calls with empty string parameters [GH-658]
+- Fix KMS unicode lookup in python 2 [GH-659]
+- Locked stacks have no dependencies [GH-661]
+- Set default profile earlier [GH-662]
+- Get rid of recursion for tail retries and extend retry/timeout [GH-663]
+
+## 1.4.1 (2018-08-28)
+
+This is a minor bugfix release for 1.4.0, no major feature updates.
+
+As of this release python 3.5+ support is no longer considered experimental, and should be stable.
+
+Special thanks to @troyready for this release, I think most of these PRs were his :)
+
+- allow raw cfn templates to be loaded from remote package\_sources [GH-638]
+- Add missing config keys to s3 package source model [GH-642]
+- Account for UsePreviousValue parameters in diff [GH-644]
+- fix file lookup documented and actual return types [GH-646]
+- Creates a memoized provider builder for AWS [GH-648]
+- update git ref to explicitly return string (fix py3 bytes error) [GH-649]
+- Lock botocore/boto to versions that work with moto [GH-651]
+
+## 1.4.0 (2018-08-05)
+
+- YAML & JSON codecs for `file` lookup [GH-537]
+- Arbitrary `command` hook [GH-565]
+- Fix datetime is not JSON serializable error [GH-591]
+- Run dump and outline actions offline [GH-594]
+- Helper Makefile for functional tests [GH-597]
+- Python3 support!!! [GH-600]
+- YAML blueprint testing framework [GH-606]
+- new `add_output` helper on Blueprint [GH-611]
+- Include lookup contents when lookups fail [GH-614]
+- Fix issue with using previous value for parameters [GH-615]
+- Stricter config parsing - only allow unrecognized config variables at the top-level [GH-623]
+- Documentation for the `default` lookup [GH-636]
+- Allow configs without stacks [GH-640]
+
+## 1.3.0 (2018-05-03)
+
+- Support for provisioning stacks in multiple accounts and regions has been added [GH-553], [GH-551]
+- Added a `--profile` flag, which can be used to set the global default profile that stacker will use (similar to `AWS_PROFILE`) [GH-563]
+- `class_path`/`template_path` are no longer required when a stack is `locked` [GH-557]
+- Support for setting stack policies on stacks has been added [GH-570]
+
+## 1.2.0 (2018-03-01)
+
+The biggest change in this release has to do with how we build the graph
+of dependencies between stacks. This is now a true DAG.  As well, to
+speed up performance we now walk the graph in a threaded mode, allowing
+true parallelism and speeding up "wide" stack graphs considerably.
+
+- assertRenderedBlueprint always dumps current results [GH-528]
+- The `--stacks` flag now automatically builds dependencies of the given stack [GH-523]
+- an unecessary DescribeStacks network call was removed [GH-529]
+- support stack json/yaml templates [GH-530]
+- `stacker {build,destroy}` now executes stacks in parallel. Parallelism can be controled with a `-j` flag. [GH-531]
+- logging output has been simplified and no longer uses ANSI escape sequences to clear the screen [GH-532]
+- logging output is now colorized in `--interactive` mode if the terminal has a TTY [GH-532]
+- removed the upper bound on the boto3 dependency [GH-542]
+
+## 1.2.0rc2 (2018-02-27)
+
+- Fix parameter handling for diffs [GH-540]
+- Fix an issue where SIGTERM/SIGINT weren't handled immediately [GH-543]
+- Log a line when SIGINT/SIGTERM are handled [GH-543]
+- Log failed steps at the end of plan execution [GH-543]
+- Remove upper bound on boto3 dependency [GH-542]
+
+## 1.2.0rc1 (2018-02-15)
+
+The biggest change in this release has to do with how we build the graph
+of dependencies between stacks. This is now a true DAG.  As well, to
+speed up performance we now walk the graph in a threaded mode, allowing
+true parallelism and speeding up "wide" stack graphs considerably.
+
+- assertRenderedBlueprint always dumps current results [GH-528]
+- stacker now builds a DAG internally [GH-523]
+- The `--stacks` flag now automatically builds dependencies of the given stack [GH-523]
+- an unecessary DescribeStacks network call was removed [GH-529]
+- support stack json/yaml templates [GH-530]
+- `stacker {build,destroy}` now executes stacks in parallel. Parallelism can be controled with a `-j` flag. [GH-531]
+- logging output has been simplified and no longer uses ANSI escape sequences to clear the screen [GH-532]
+- logging output is now colorized in `--interactive` mode if the terminal has a TTY [GH-532]
 
 
 ## 1.1.4 (2018-01-26)

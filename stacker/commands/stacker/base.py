@@ -1,12 +1,38 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import object
 import argparse
+import threading
+import signal
 from collections import Mapping
 import logging
 
 from ...environment import parse_environment
-from ...logger import (
-    BASIC_LOGGER_TYPE,
-    setup_logging,
-)
+
+logger = logging.getLogger(__name__)
+
+SIGNAL_NAMES = {
+    signal.SIGINT: "SIGINT",
+    signal.SIGTERM: "SIGTERM",
+}
+
+
+def cancel():
+    """Returns a threading.Event() that will get set when SIGTERM, or
+    SIGINT are triggered. This can be used to cancel execution of threads.
+    """
+    cancel = threading.Event()
+
+    def cancel_execution(signum, frame):
+        signame = SIGNAL_NAMES.get(signum, signum)
+        logger.info("Signal %s received, quitting "
+                    "(this can take some time)...", signame)
+        cancel.set()
+
+    signal.signal(signal.SIGINT, cancel_execution)
+    signal.signal(signal.SIGTERM, cancel_execution)
+    return cancel
 
 
 class KeyValueAction(argparse.Action):
@@ -61,9 +87,9 @@ class BaseCommand(object):
     description = None
     subcommands = tuple()
     subcommands_help = None
-    logger_type = BASIC_LOGGER_TYPE
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, setup_logging=None, *args, **kwargs):
+        self.setup_logging = setup_logging
         if not self.name:
             raise ValueError("Subcommands must set \"name\": %s" % (self,))
 
@@ -81,12 +107,6 @@ class BaseCommand(object):
                 subparser.set_defaults(
                     get_context_kwargs=subcommand.get_context_kwargs)
 
-    @property
-    def logger(self):
-        if not hasattr(self, "_logger"):
-            self._logger = logging.getLogger(self.name)
-        return self._logger
-
     def parse_args(self, *vargs):
         parser = argparse.ArgumentParser(description=self.description)
         self.add_subcommands(parser)
@@ -99,11 +119,8 @@ class BaseCommand(object):
         pass
 
     def configure(self, options, **kwargs):
-        self.logger_type = setup_logging(
-            options.verbose,
-            interactive=options.interactive,
-            tail=getattr(options, "tail", False)
-        )
+        if self.setup_logging:
+            self.setup_logging(options.verbose, self.config.log_formats)
 
     def get_context_kwargs(self, options, **kwargs):
         """Return a dictionary of kwargs that will be used with the Context.
@@ -131,7 +148,12 @@ class BaseCommand(object):
                  "more than once.")
         parser.add_argument(
             "-r", "--region",
-            help="The AWS region to launch in.")
+            help="The default AWS region to use for all AWS API calls.")
+        parser.add_argument(
+            "-p", "--profile",
+            help="The default AWS profile to use for all AWS API calls. If "
+                 "not specified, the default will be according to http://bo"
+                 "to3.readthedocs.io/en/latest/guide/configuration.html.")
         parser.add_argument(
             "-v", "--verbose", action="count", default=0,
             help="Increase output verbosity. May be specified up to twice.")

@@ -1,6 +1,10 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 from mock import MagicMock
 import unittest
 
+from stacker.lookups import register_lookup_handler
 from stacker.context import Context
 from stacker.config import Config
 from stacker.stack import Stack
@@ -17,6 +21,7 @@ class TestStack(unittest.TestCase):
             definition=generate_definition("vpc", 1),
             context=self.context,
         )
+        register_lookup_handler("noop", lambda **kwargs: "test")
 
     def test_stack_requires(self):
         definition = generate_definition(
@@ -31,18 +36,44 @@ class TestStack(unittest.TestCase):
                 "Var3": "${output fakeStack::FakeOutput},"
                         "${output fakeStack2::FakeOutput}",
             },
-            requires=[self.context.get_fqn("fakeStack")],
+            requires=["fakeStack"],
         )
         stack = Stack(definition=definition, context=self.context)
         self.assertEqual(len(stack.requires), 2)
         self.assertIn(
-            self.context.get_fqn("fakeStack"),
+            "fakeStack",
             stack.requires,
         )
         self.assertIn(
-            self.context.get_fqn("fakeStack2"),
+            "fakeStack2",
             stack.requires,
         )
+
+    def test_stack_requires_when_locked(self):
+        definition = generate_definition(
+            base_name="vpc",
+            stack_id=1,
+            variables={
+                "Var1": "${noop fakeStack3::FakeOutput}",
+                "Var2": (
+                    "some.template.value:${output fakeStack2::FakeOutput}:"
+                    "${output fakeStack::FakeOutput}"
+                ),
+                "Var3": "${output fakeStack::FakeOutput},"
+                        "${output fakeStack2::FakeOutput}",
+            },
+            requires=["fakeStack"],
+        )
+        stack = Stack(definition=definition, context=self.context)
+
+        stack.locked = True
+        self.assertEqual(len(stack.requires), 0)
+
+        # TODO(ejholmes): When the stack is in `--force`, it's not really
+        # locked. Maybe it would be better if `stack.locked` were false when
+        # the stack is in `--force`.
+        stack.force = True
+        self.assertEqual(len(stack.requires), 2)
 
     def test_stack_requires_circular_ref(self):
         definition = generate_definition(
@@ -69,7 +100,7 @@ class TestStack(unittest.TestCase):
         stack._blueprint.get_parameter_values.return_value = {
             "Param2": "Some Resolved Value",
         }
-        self.assertEqual(len(stack.parameter_values.keys()), 1)
+        self.assertEqual(len(stack.parameter_values), 1)
         param = stack.parameter_values["Param2"]
         self.assertEqual(param, "Some Resolved Value")
 

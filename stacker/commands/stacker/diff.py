@@ -3,6 +3,9 @@
 Sometimes small changes can have big impacts.  Run "stacker diff" before
 "stacker build" to detect bad things(tm) from happening in advance!
 """
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 
 from .base import BaseCommand
 from ...actions import diff
@@ -28,7 +31,8 @@ class Diff(BaseCommand):
 
     def run(self, options, **kwargs):
         super(Diff, self).run(options, **kwargs)
-        action = diff.Action(options.context, provider=options.provider)
+        action = diff.Action(options.context,
+                             provider_builder=options.provider_builder)
         action.execute()
 
     def get_context_kwargs(self, options, **kwargs):

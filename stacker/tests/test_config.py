@@ -1,3 +1,7 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import next
 import sys
 import unittest
 
@@ -45,7 +49,7 @@ class TestConfig(unittest.TestCase):
         c = render(conf, e)
         self.assertEqual("namespace: !!str", c)
 
-    def test_config_validate_missing_stack_class_path(self):
+    def test_config_validate_missing_stack_source(self):
         config = Config({
             "namespace": "prod",
             "stacks": [
@@ -54,20 +58,41 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(exceptions.InvalidConfig) as ex:
             config.validate()
 
-        error = ex.exception.errors['stacks'][0]['class_path'].errors[0]
+        stack_errors = ex.exception.errors['stacks'][0]
         self.assertEquals(
-            error.__str__(),
-            "This field is required.")
+            stack_errors['template_path'][0].__str__(),
+            "class_path or template_path is required.")
+        self.assertEquals(
+            stack_errors['class_path'][0].__str__(),
+            "class_path or template_path is required.")
 
-    def test_config_validate_no_stacks(self):
-        config = Config({"namespace": "prod"})
+    def test_config_validate_missing_stack_source_when_locked(self):
+        config = Config({
+            "namespace": "prod",
+            "stacks": [
+                {
+                    "name": "bastion",
+                    "locked": True}]})
+        config.validate()
+
+    def test_config_validate_stack_class_and_template_paths(self):
+        config = Config({
+            "namespace": "prod",
+            "stacks": [
+                {
+                    "name": "bastion",
+                    "class_path": "foo",
+                    "template_path": "bar"}]})
         with self.assertRaises(exceptions.InvalidConfig) as ex:
             config.validate()
 
-        error = ex.exception.errors['stacks'].errors[0]
+        stack_errors = ex.exception.errors['stacks'][0]
         self.assertEquals(
-            error.__str__(),
-            "Should have more than one element.")
+            stack_errors['template_path'][0].__str__(),
+            "class_path cannot be present when template_path is provided.")
+        self.assertEquals(
+            stack_errors['class_path'][0].__str__(),
+            "template_path cannot be present when class_path is provided.")
 
     def test_config_validate_missing_name(self):
         config = Config({
@@ -104,7 +129,7 @@ class TestConfig(unittest.TestCase):
     def test_dump_unicode(self):
         config = Config()
         config.namespace = "test"
-        self.assertEquals(dump(config), """namespace: test
+        self.assertEquals(dump(config), b"""namespace: test
 stacks: []
 """)
 
@@ -112,8 +137,8 @@ stacks: []
         # Ensure that we're producing standard yaml, that doesn't include
         # python specific objects.
         self.assertNotEquals(
-            dump(config), "namespace: !!python/unicode 'test'\n")
-        self.assertEquals(dump(config), """namespace: test
+            dump(config), b"namespace: !!python/unicode 'test'\n")
+        self.assertEquals(dump(config), b"""namespace: test
 stacks: []
 """)
 
@@ -180,21 +205,25 @@ stacks: []
         pre_build:
           - path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         post_build:
           - path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         pre_destroy:
           - path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         post_destroy:
           - path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         package_sources:
@@ -207,6 +236,10 @@ stacks: []
             - bucket: anotherexamplebucket
               key: example-blueprints-v3.tar.gz
               use_latest: false
+              paths:
+                - foo
+              configs:
+                - foo/config.yml
           git:
             - uri: git@github.com:acmecorp/stacker_blueprints.git
             - uri: git@github.com:remind101/stacker_blueprints.git
@@ -217,6 +250,10 @@ stacks: []
               branch: staging
             - uri: git@github.com:contoso/foo.git
               commit: 12345678
+              paths:
+                - bar
+              configs:
+                - bar/moreconfig.yml
         tags:
           environment: production
         stacks:
@@ -238,24 +275,28 @@ stacks: []
           prebuild_createdomain:
             path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         post_build:
           postbuild_createdomain:
             path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         pre_destroy:
           predestroy_createdomain:
             path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         post_destroy:
           postdestroy_createdomain:
             path: stacker.hooks.route53.create_domain
             required: true
+            enabled: true
             args:
               domain: mydomain.com
         package_sources:
@@ -268,6 +309,10 @@ stacks: []
             - bucket: anotherexamplebucket
               key: example-blueprints-v3.tar.gz
               use_latest: false
+              paths:
+                - foo
+              configs:
+                - foo/config.yml
           git:
             - uri: git@github.com:acmecorp/stacker_blueprints.git
             - uri: git@github.com:remind101/stacker_blueprints.git
@@ -278,6 +323,10 @@ stacks: []
               branch: staging
             - uri: git@github.com:contoso/foo.git
               commit: 12345678
+              paths:
+                - bar
+              configs:
+                - bar/moreconfig.yml
         tags:
           environment: production
         stacks:
@@ -381,7 +430,7 @@ stacks: []
                     "class_path": "blueprints.Bastion",
                     "requires": ["vpc"]})]})
 
-        self.assertEqual(dump(config), """namespace: prod
+        self.assertEqual(dump(config), b"""namespace: prod
 stacks:
 - class_path: blueprints.VPC
   enabled: true
@@ -492,6 +541,20 @@ stacks:
             class_path: blueprints.VPC2
         """
         with self.assertRaises(ConstructorError):
+            parse(yaml_config)
+
+    def test_parse_invalid_inner_keys(self):
+        yaml_config = """
+        namespace: prod
+        stacks:
+        - name: vpc
+          class_path: blueprints.VPC
+          garbage: yes
+          variables:
+            Foo: bar
+        """
+
+        with self.assertRaises(exceptions.InvalidConfig):
             parse(yaml_config)
 
 

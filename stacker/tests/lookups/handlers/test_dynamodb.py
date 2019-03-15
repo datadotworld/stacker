@@ -1,7 +1,10 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 import unittest
 import mock
 from botocore.stub import Stubber
-from stacker.lookups.handlers.dynamodb import handler
+from stacker.lookups.handlers.dynamodb import DynamodbLookup
 import boto3
 from stacker.tests.factories import SessionStub
 
@@ -34,7 +37,7 @@ class TestDynamoDBHandler(unittest.TestCase):
                                   self.get_parameters_response,
                                   expected_params)
         with self.stubber:
-            value = handler(base_lookup_key)
+            value = DynamodbLookup.handle(base_lookup_key)
             self.assertEqual(value, base_lookup_key_valid)
 
     @mock.patch('stacker.lookups.handlers.dynamodb.get_session',
@@ -54,7 +57,7 @@ class TestDynamoDBHandler(unittest.TestCase):
                                   self.get_parameters_response,
                                   expected_params)
         with self.stubber:
-            value = handler(base_lookup_key)
+            value = DynamodbLookup.handle(base_lookup_key)
             self.assertEqual(value, base_lookup_key_valid)
 
     @mock.patch('stacker.lookups.handlers.dynamodb.get_session',
@@ -74,7 +77,7 @@ class TestDynamoDBHandler(unittest.TestCase):
                                   self.get_parameters_response,
                                   expected_params)
         with self.stubber:
-            value = handler(base_lookup_key)
+            value = DynamodbLookup.handle(base_lookup_key)
             self.assertEqual(value, base_lookup_key_valid)
 
     @mock.patch('stacker.lookups.handlers.dynamodb.get_session',
@@ -93,7 +96,7 @@ class TestDynamoDBHandler(unittest.TestCase):
                                   expected_params)
         with self.stubber:
             try:
-                handler(base_lookup_key)
+                DynamodbLookup.handle(base_lookup_key)
             except ValueError as e:
                 self.assertEqual(
                     'Please make sure to include a dynamodb table name',
@@ -114,7 +117,7 @@ class TestDynamoDBHandler(unittest.TestCase):
                                   expected_params)
         with self.stubber:
             try:
-                handler(base_lookup_key)
+                DynamodbLookup.handle(base_lookup_key)
             except ValueError as e:
                 self.assertEqual(
                     'Please make sure to include a tablename',
@@ -137,7 +140,7 @@ class TestDynamoDBHandler(unittest.TestCase):
                                       expected_params=expected_params)
         with self.stubber:
             try:
-                handler(base_lookup_key)
+                DynamodbLookup.handle(base_lookup_key)
             except ValueError as e:
                 self.assertEqual(
                     'Cannot find the dynamodb table: FakeTable',
@@ -161,7 +164,7 @@ class TestDynamoDBHandler(unittest.TestCase):
 
         with self.stubber:
             try:
-                handler(base_lookup_key)
+                DynamodbLookup.handle(base_lookup_key)
             except ValueError as e:
                 self.assertEqual(
                     'No dynamodb record matched the partition key: FakeKey',
@@ -184,7 +187,7 @@ class TestDynamoDBHandler(unittest.TestCase):
                                   expected_params)
         with self.stubber:
             try:
-                handler(base_lookup_key)
+                DynamodbLookup.handle(base_lookup_key)
             except ValueError as e:
                 self.assertEqual(
                     'The dynamodb record could not be found using '

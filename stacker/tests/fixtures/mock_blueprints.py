@@ -1,11 +1,16 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import range
 from troposphere import GetAtt, Output, Sub, Ref
 from troposphere import iam
 
-from awacs.aws import Policy, Statement
+from awacs.aws import Policy, Statement, AWSPrincipal
 import awacs
 import awacs.s3
 import awacs.cloudformation
 import awacs.iam
+import awacs.sts
 
 from troposphere.cloudformation import WaitCondition, WaitConditionHandle
 
@@ -42,8 +47,9 @@ class FunctionalTests(Blueprint):
         t = self.template
 
         bucket_arn = Sub("arn:aws:s3:::${StackerBucket}*")
+        objects_arn = Sub("arn:aws:s3:::${StackerBucket}*/*")
         cloudformation_scope = Sub(
-            "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:"
+            "arn:aws:cloudformation:*:${AWS::AccountId}:"
             "stack/${StackerNamespace}-*")
         changeset_scope = "*"
 
@@ -55,11 +61,19 @@ class FunctionalTests(Blueprint):
                 Statement=[
                     Statement(
                         Effect="Allow",
+                        Resource=["*"],
+                        Action=[awacs.s3.ListAllMyBuckets]
+                    ),
+                    Statement(
+                        Effect="Allow",
                         Resource=[bucket_arn],
                         Action=[
                             awacs.s3.ListBucket,
                             awacs.s3.GetBucketLocation,
-                            awacs.s3.CreateBucket]),
+                            awacs.s3.CreateBucket,
+                            awacs.s3.DeleteBucket,
+                        ]
+                    ),
                     Statement(
                         Effect="Allow",
                         Resource=[bucket_arn],
@@ -67,7 +81,16 @@ class FunctionalTests(Blueprint):
                             awacs.s3.GetObject,
                             awacs.s3.GetObjectAcl,
                             awacs.s3.PutObject,
-                            awacs.s3.PutObjectAcl]),
+                            awacs.s3.PutObjectAcl,
+                        ]
+                    ),
+                    Statement(
+                        Effect="Allow",
+                        Resource=[objects_arn],
+                        Action=[
+                            awacs.s3.DeleteObject,
+                        ]
+                    ),
                     Statement(
                         Effect="Allow",
                         Resource=[changeset_scope],
@@ -75,12 +98,13 @@ class FunctionalTests(Blueprint):
                             awacs.cloudformation.DescribeChangeSet,
                             awacs.cloudformation.ExecuteChangeSet,
                             awacs.cloudformation.DeleteChangeSet,
-                        ]),
+                        ]
+                    ),
                     Statement(
                         Effect="Deny",
                         Resource=[Ref("AWS::StackId")],
-                        Action=[
-                            awacs.cloudformation.Action("*")]),
+                        Action=[awacs.cloudformation.Action("*")]
+                    ),
                     Statement(
                         Effect="Allow",
                         Resource=[cloudformation_scope],
@@ -91,13 +115,45 @@ class FunctionalTests(Blueprint):
                             awacs.cloudformation.DeleteStack,
                             awacs.cloudformation.CreateStack,
                             awacs.cloudformation.UpdateStack,
-                            awacs.cloudformation.DescribeStacks])]))
+                            awacs.cloudformation.SetStackPolicy,
+                            awacs.cloudformation.DescribeStacks,
+                            awacs.cloudformation.DescribeStackEvents
+                        ]
+                    )
+                ]
+            )
+        )
+
+        principal = AWSPrincipal(Ref("AWS::AccountId"))
+        role = t.add_resource(
+            iam.Role(
+                "FunctionalTestRole",
+                AssumeRolePolicyDocument=Policy(
+                    Statement=[
+                        Statement(
+                            Effect="Allow",
+                            Action=[
+                                awacs.sts.AssumeRole],
+                            Principal=principal)]),
+                Policies=[
+                    stacker_policy]))
+
+        assumerole_policy = iam.Policy(
+            PolicyName="AssumeRole",
+            PolicyDocument=Policy(
+                Statement=[
+                    Statement(
+                        Effect="Allow",
+                        Resource=[GetAtt(role, "Arn")],
+                        Action=[
+                            awacs.sts.AssumeRole])]))
 
         user = t.add_resource(
             iam.User(
                 "FunctionalTestUser",
                 Policies=[
-                    stacker_policy]))
+                    stacker_policy,
+                    assumerole_policy]))
 
         key = t.add_resource(
             iam.AccessKey(
@@ -111,6 +167,10 @@ class FunctionalTests(Blueprint):
             Output(
                 "SecretAccessKey",
                 Value=GetAtt("FunctionalTestKey", "SecretAccessKey")))
+        t.add_output(
+            Output(
+                "FunctionalTestRole",
+                Value=GetAtt(role, "Arn")))
 
 
 class Dummy(Blueprint):
@@ -123,6 +183,7 @@ class Dummy(Blueprint):
     def create_template(self):
         self.template.add_resource(WaitConditionHandle("Dummy"))
         self.template.add_output(Output("DummyId", Value="dummy-1234"))
+        self.template.add_output(Output("Region", Value=Ref("AWS::Region")))
 
 
 class Dummy2(Blueprint):
@@ -140,6 +201,62 @@ class Dummy2(Blueprint):
         self.template.add_resource(WaitConditionHandle("Dummy"))
         self.template.add_output(Output("DummyId", Value="dummy-1234"))
         self.template.add_resource(WaitConditionHandle("Dummy2"))
+
+
+class LongRunningDummy(Blueprint):
+    """
+    Meant to be an attempt to create a cheap blueprint that takes a little bit
+    of time to create/rollback/destroy to avoid some of the race conditions
+    we've seen in some of our functional tests.
+    """
+    VARIABLES = {
+        "Count": {
+            "type": int,
+            "description": "The # of WaitConditonHandles to create.",
+            "default": 1,
+        },
+        "BreakLast": {
+            "type": bool,
+            "description": "Whether or not to break the last WaitConditon "
+                           "by creating an invalid WaitConditionHandle.",
+            "default": True,
+        },
+        "OutputValue": {
+            "type": str,
+            "description": "The value to put in an output to allow for "
+                           "updates.",
+            "default": "DefaultOutput",
+        },
+    }
+
+    def create_template(self):
+        v = self.get_variables()
+        t = self.template
+        base_name = "Dummy"
+
+        for i in range(v["Count"]):
+            name = "%s%s" % (base_name, i)
+            last_name = None
+            if i:
+                last_name = "%s%s" % (base_name, i - 1)
+            wch = WaitConditionHandle(name)
+            if last_name is not None:
+                wch.DependsOn = last_name
+            t.add_resource(wch)
+
+        self.add_output("OutputValue", str(v["OutputValue"]))
+        self.add_output("WCHCount", str(v["Count"]))
+
+        if v["BreakLast"]:
+            t.add_resource(
+                WaitCondition(
+                    "BrokenWaitCondition",
+                    Handle=wch.Ref(),
+                    # Timeout is made deliberately large so CF rejects it
+                    Timeout=2 ** 32,
+                    Count=0
+                )
+            )
 
 
 class Broken(Blueprint):
@@ -212,6 +329,23 @@ class VPC(Blueprint):
 
     def create_template(self):
         self.template.add_resource(WaitConditionHandle("VPC"))
+
+
+class DiffTester(Blueprint):
+    VARIABLES = {
+        "InstanceType": {
+            "type": CFNString,
+            "description": "NAT EC2 instance type.",
+            "default": "m3.medium"},
+        "WaitConditionCount": {
+            "type": int,
+            "description": "Number of WaitConditionHandle resources "
+                           "to add to the template"}
+    }
+
+    def create_template(self):
+        for i in range(self.get_variables()["WaitConditionCount"]):
+            self.template.add_resource(WaitConditionHandle("VPC%d" % i))
 
 
 class Bastion(Blueprint):

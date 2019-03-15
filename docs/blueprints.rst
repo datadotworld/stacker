@@ -2,8 +2,11 @@
 Blueprints
 ==========
 
-Blueprints are python classes that build CloudFormation templates.
-Traditionally these are built using troposphere_, but that is not absolutely
+Blueprints are python classes that dynamically build CloudFormation templates. Where
+you would specify a raw Cloudformation template in a stack using the ``template_path`` key,
+you instead specify a blueprint python file using the ``class_path`` key.
+
+Traditionally blueprints are built using troposphere_, but that is not absolutely
 necessary. You are encouraged to check out the library of publicly shared
 Blueprints in the stacker_blueprints_ package.
 
@@ -244,9 +247,10 @@ CFNType
 
 The ``CFNType`` can be used to signal that a variable should be submitted
 to CloudFormation as a Parameter instead of only available to the
-Blueprint when rendering. This is useful if you want to leverage AWS
-specific Parameter types like ``List<AWS::EC2::Image::Id>``. See
-``stacker.blueprints.variables.types`` for available subclasses of the
+Blueprint when rendering. This is useful if you want to leverage AWS-
+Specific Parameter types (e.g. ``List<AWS::EC2::Image::Id>``) or Systems
+Manager Parameter Store values (e.g. ``AWS::SSM::Parameter::Value<String>``).
+See ``stacker.blueprints.variables.types`` for available subclasses of the
 ``CFNType``.
 
 Example
@@ -288,7 +292,7 @@ Below is an annotated example:
             t = self.template
 
             # `get_variables` returns a dictionary of <variable name>: <variable
-            value>. For the sublcasses of `CFNType`, the values are
+            value>. For the subclasses of `CFNType`, the values are
             instances of `CFNParameter` which have a `ref` helper property
             which will return a troposphere `Ref` to the parameter name.
             variables = self.get_variables()
@@ -405,9 +409,39 @@ Examples of using the `BlueprintTestCase` class can be found in the
 stacker_blueprints repo. For example, see the tests used to test the
 `Route53 DNSRecords Blueprint`_ and the accompanying `output results`_:
 
+Yaml (stacker) format tests
+---------------------------
+
+In order to wrap the `BlueprintTestCase` tests in a format similar to stacker's
+stack format, the `YamlDirTestGenerator` class is provided. When subclassed in
+a directory, it will search for yaml files in that directory with certain
+structure and execute a test case for it. As an example:
+
+.. code-block:: yaml
+
+  ---
+  namespace: test
+  stacks:
+    - name: test_stack
+      class_path: stacker_blueprints.s3.Buckets
+      variables:
+        var1: val1
+
+When run from nosetests, this will create a template fixture file called
+test_stack.json containing the output from the `stacker_blueprints.s3.Buckets`
+template.
+
+Examples of using the `YamlDirTestGenerator` class can be found in the
+stacker_blueprints repo. For example, see the tests used to test the
+`s3.Buckets`_ class and the accompanying `fixture`_. These are
+generated from a `subclass of YamlDirTestGenerator`_.
+
 .. _troposphere: https://github.com/cloudtools/troposphere
-.. _stacker_blueprints: https://github.com/remind101/stacker_blueprints
-.. _Route53 DNSRecords Blueprint: https://github.com/remind101/stacker_blueprints/blob/master/tests/test_route53.py
-.. _output results: https://github.com/remind101/stacker_blueprints/tree/master/tests/fixtures/blueprints
+.. _stacker_blueprints: https://github.com/cloudtools/stacker_blueprints
+.. _Route53 DNSRecords Blueprint: https://github.com/cloudtools/stacker_blueprints/blob/master/tests/test_route53.py
+.. _output results: https://github.com/cloudtools/stacker_blueprints/tree/master/tests/fixtures/blueprints
 .. _Resource Type: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-template-resource-type-ref.html
 .. _Property Type: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-product-property-reference.html
+.. _s3.Buckets: https://github.com/cloudtools/stacker_blueprints/blob/master/tests/test_s3.yaml
+.. _fixture: https://github.com/cloudtools/stacker_blueprints/blob/master/tests/fixtures/blueprints/s3_static_website.json
+.. _subclass of YamlDirTestGenerator: https://github.com/cloudtools/stacker_blueprints/blob/master/tests/__init__.py

@@ -1,3 +1,7 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from past.builtins import basestring
 from collections import namedtuple
 import re
 
@@ -15,7 +19,7 @@ LOOKUP_REGEX = re.compile("""
                                        # space
 ?\s*                                   # any number of spaces separating the
                                        # type from the input
-(?P<input>[@\+\/,\._\-a-zA-Z0-9\:\s=\[\]\*]+) # the input value to the lookup
+(?P<input>[@\+\/,\.\?_\-a-zA-Z0-9\:\s=\[\]\*]+) # the input value to the lookup
 )\}                                    # closing brace of the lookup
 """, re.VERBOSE)
 

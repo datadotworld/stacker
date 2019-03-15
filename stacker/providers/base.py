@@ -1,6 +1,17 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import object
+
+
 def not_implemented(method):
     raise NotImplementedError("Provider does not support '%s' "
                               "method." % method)
+
+
+class BaseProviderBuilder(object):
+    def build(self, region=None):
+        not_implemented("build")
 
 
 class BaseProvider(object):

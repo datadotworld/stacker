@@ -1,3 +1,7 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import object
 import copy
 
 from . import util
@@ -5,12 +9,8 @@ from .variables import (
     Variable,
     resolve_variables,
 )
-from .lookups.handlers.output import (
-    TYPE_NAME as OUTPUT_LOOKUP_TYPE_NAME,
-    deconstruct,
-)
 
-from .exceptions import FailedVariableLookup
+from .blueprints.raw import RawTemplateBlueprint
 
 
 def _gather_variables(stack_def):
@@ -39,7 +39,7 @@ def _gather_variables(stack_def):
             variables.
     """
     variable_values = copy.deepcopy(stack_def.variables or {})
-    return [Variable(k, v) for k, v in variable_values.iteritems()]
+    return [Variable(k, v) for k, v in variable_values.items()]
 
 
 class Stack(object):
@@ -60,8 +60,11 @@ class Stack(object):
 
     def __init__(self, definition, context, variables=None, mappings=None,
                  locked=False, force=False, enabled=True, protected=False):
+        self.logging = True
         self.name = definition.name
-        self.fqn = context.get_fqn(self.name)
+        self.fqn = context.get_fqn(definition.stack_name or self.name)
+        self.region = definition.region
+        self.profile = definition.profile
         self.definition = definition
         self.variables = _gather_variables(definition)
         self.mappings = mappings
@@ -69,51 +72,73 @@ class Stack(object):
         self.force = force
         self.enabled = enabled
         self.protected = protected
-        self.context = copy.deepcopy(context)
+        self.context = context
+        self.outputs = None
+        self.in_progress_behavior = definition.in_progress_behavior
 
     def __repr__(self):
         return self.fqn
 
     @property
+    def required_by(self):
+        return self.definition.required_by or []
+
+    @property
     def requires(self):
-        requires = set([self.context.get_fqn(r) for r in
-                        self.definition.requires or []])
+        # By definition, a locked stack has no dependencies, because we won't
+        # be performing an update operation on the stack. This means, resolving
+        # outputs from dependencies is unnecessary.
+        if self.locked and not self.force:
+            return []
+
+        requires = set(self.definition.requires or [])
 
         # Add any dependencies based on output lookups
         for variable in self.variables:
-            for lookup in variable.lookups:
-                if lookup.type == OUTPUT_LOOKUP_TYPE_NAME:
-
-                    try:
-                        d = deconstruct(lookup.input)
-                    except ValueError as e:
-                        raise FailedVariableLookup(self.name, e)
-
-                    if d.stack_name == self.name:
-                        message = (
-                            "Variable %s in stack %s has a ciruclar reference "
-                            "within lookup: %s"
-                        ) % (variable.name, self.name, lookup.raw)
-                        raise ValueError(message)
-                    stack_fqn = self.context.get_fqn(d.stack_name)
-                    requires.add(stack_fqn)
-
+            deps = variable.dependencies()
+            if self.name in deps:
+                message = (
+                    "Variable %s in stack %s has a circular reference"
+                ) % (variable.name, self.name)
+                raise ValueError(message)
+            requires.update(deps)
         return requires
+
+    @property
+    def stack_policy(self):
+        if not hasattr(self, "_stack_policy"):
+            self._stack_policy = None
+            if self.definition.stack_policy_path:
+                with open(self.definition.stack_policy_path) as f:
+                    self._stack_policy = f.read()
+
+        return self._stack_policy
 
     @property
     def blueprint(self):
         if not hasattr(self, "_blueprint"):
-            class_path = self.definition.class_path
-            blueprint_class = util.load_object_from_string(class_path)
-            if not hasattr(blueprint_class, "rendered"):
-                raise AttributeError("Stack class %s does not have a "
-                                     "\"rendered\" "
-                                     "attribute." % (class_path,))
+            kwargs = {}
+            blueprint_class = None
+            if self.definition.class_path:
+                class_path = self.definition.class_path
+                blueprint_class = util.load_object_from_string(class_path)
+                if not hasattr(blueprint_class, "rendered"):
+                    raise AttributeError("Stack class %s does not have a "
+                                         "\"rendered\" "
+                                         "attribute." % (class_path,))
+            elif self.definition.template_path:
+                blueprint_class = RawTemplateBlueprint
+                kwargs["raw_template_path"] = self.definition.template_path
+            else:
+                raise AttributeError("Stack does not have a defined class or "
+                                     "template path.")
+
             self._blueprint = blueprint_class(
                 name=self.name,
                 context=self.context,
                 mappings=self.mappings,
                 description=self.definition.description,
+                **kwargs
             )
         return self._blueprint
 
@@ -144,6 +169,11 @@ class Stack(object):
         return self.blueprint.get_parameter_values()
 
     @property
+    def all_parameter_definitions(self):
+        """Return a list of all parameters in the blueprint/template."""
+        return self.blueprint.get_parameter_definitions()
+
+    @property
     def required_parameter_definitions(self):
         """Return all the required CloudFormation Parameters for the stack."""
         return self.blueprint.get_required_parameter_definitions()
@@ -162,3 +192,6 @@ class Stack(object):
         """
         resolve_variables(self.variables, context, provider)
         self.blueprint.resolve_variables(self.variables)
+
+    def set_outputs(self, outputs):
+        self.outputs = outputs

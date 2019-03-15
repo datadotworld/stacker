@@ -1,38 +1,40 @@
 import os
 from setuptools import setup, find_packages
 
-VERSION = "1.1.4"
+
+VERSION = "1.6.0"
 
 src_dir = os.path.dirname(__file__)
 
 install_requires = [
+    "future",
     "troposphere>=1.9.0",
-    "boto3>=1.3.1,<1.5.0",
-    "PyYAML~=3.12",
+    "botocore",
+    "boto3>=1.9.111<2.0",
+    "PyYAML>=3.13b1",
     "awacs>=0.6.0",
-    "colorama~=0.3.7",
-    "formic~=0.9b",
-    "gitpython~=2.0",
-    "schematics~=2.0.1",
-    "python-dateutil~=2.0"
+    "gitpython>=2.0,<3.0",
+    "jinja2>=2.7,<3.0",
+    "schematics>=2.0.1,<2.1.0",
+    "formic2",
+    "python-dateutil>=2.0,<3.0",
 ]
 
 tests_require = [
     "mock~=2.0.0",
-    "moto~=1.1.24",
+    "moto~=1.3.7",
     "testfixtures~=4.10.0",
-    "coverage~=4.3.4"
+    "coverage~=4.3.4",
+    "flake8-future-import",
 ]
 
-setup_requires = [
-    "nose",
-]
+setup_requires = ["nose"]
 
 scripts = [
     "scripts/compare_env",
     "scripts/docker-stacker",
     "scripts/stacker.cmd",
-    "scripts/stacker"
+    "scripts/stacker",
 ]
 
 
@@ -49,7 +51,7 @@ if __name__ == "__main__":
         author="Michael Barrett",
         author_email="loki77@gmail.com",
         license="New BSD license",
-        url="https://github.com/remind101/stacker",
+        url="https://github.com/cloudtools/stacker",
         description="AWS CloudFormation Stack manager",
         long_description=read("README.rst"),
         packages=find_packages(),
@@ -57,5 +59,14 @@ if __name__ == "__main__":
         install_requires=install_requires,
         tests_require=tests_require,
         setup_requires=setup_requires,
+        extras_require=dict(testing=tests_require),
         test_suite="nose.collector",
+        classifiers=[
+            "Development Status :: 5 - Production/Stable",
+            "Environment :: Console",
+            "License :: OSI Approved :: BSD License",
+            "Programming Language :: Python :: 2.7",
+            "Programming Language :: Python :: 3.5",
+            "Programming Language :: Python :: 3.6",
+        ],
     )

@@ -1,3 +1,6 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 import unittest
 
 from stacker.context import Context, get_fqn
@@ -20,13 +23,6 @@ class TestContext(unittest.TestCase):
         )
         self.assertEqual(context.mappings, {})
         self.assertEqual(context.stack_names, ["stack"])
-
-    def test_context_get_stacks_specific_stacks(self):
-        context = Context(
-            config=self.config,
-            stack_names=["stack2"],
-        )
-        self.assertEqual(len(context.get_stacks()), 1)
 
     def test_context_get_stacks(self):
         context = Context(config=self.config)

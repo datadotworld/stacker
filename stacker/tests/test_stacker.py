@@ -1,3 +1,6 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 import unittest
 
 from stacker.commands import Stacker
@@ -78,23 +81,6 @@ class TestStacker(unittest.TestCase):
         stacks = args.context.get_stacks()
         self.assertEqual(len(stacks), 2)
 
-    def test_stacker_build_context_single_stack_specified(self):
-        # Added the below test that is similar to the
-        # test_stacker_build_context_stack_names_specified test because
-        # someone could break stacks lookup flags but still get back 2 stacks
-        # with the assertEquil to 2. Now we also check for assertEquil to 1
-        stacker = Stacker()
-        args = stacker.parse_args(
-            ["build",
-             "-r", "us-west-2",
-             "stacker/tests/fixtures/basic.env",
-             "stacker/tests/fixtures/vpc-bastion-db-web.yaml",
-             "--stacks", "vpc"]
-        )
-        stacker.configure(args)
-        stacks = args.context.get_stacks()
-        self.assertEqual(len(stacks), 1)
-
     def test_stacker_build_fail_when_parameters_in_stack_def(self):
         stacker = Stacker()
         args = stacker.parse_args(
@@ -105,6 +91,27 @@ class TestStacker(unittest.TestCase):
         )
         with self.assertRaises(InvalidConfig):
             stacker.configure(args)
+
+    def test_stacker_build_custom_info_log_format(self):
+        stacker = Stacker()
+        args = stacker.parse_args(
+            [
+                "build", "-r", "us-west-2",
+                "stacker/tests/fixtures/not-basic.env",
+                "stacker/tests/fixtures/vpc-custom-log-format-info.yaml"
+            ]
+        )
+        stacker.configure(args)
+        self.assertEqual(
+            stacker.config.log_formats["info"],
+            '[%(asctime)s] test custom log format - %(message)s'
+        )
+        self.assertIsNone(
+            stacker.config.log_formats.get("color")
+        )
+        self.assertIsNone(
+            stacker.config.log_formats.get("debug")
+        )
 
 
 if __name__ == '__main__':

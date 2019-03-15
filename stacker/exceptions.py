@@ -1,3 +1,8 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
+
 class InvalidConfig(Exception):
     def __init__(self, errors):
         super(InvalidConfig, self).__init__(errors)
@@ -10,25 +15,50 @@ class InvalidLookupCombination(Exception):
         message = (
             "Lookup: \"{}\" has non-string return value, must be only lookup "
             "present (not {}) in \"{}\""
-        ).format(lookup.raw, len(lookups), value)
+        ).format(str(lookup), len(lookups), value)
         super(InvalidLookupCombination, self).__init__(message,
                                                        *args,
                                                        **kwargs)
 
 
+class InvalidLookupConcatenation(Exception):
+    """
+    Intermediary Exception to be converted to InvalidLookupCombination once it
+    bubbles up there
+    """
+    def __init__(self, lookup, lookups, *args, **kwargs):
+        self.lookup = lookup
+        self.lookups = lookups
+        super(InvalidLookupConcatenation, self).__init__("", *args, **kwargs)
+
+
 class UnknownLookupType(Exception):
 
-    def __init__(self, lookup, *args, **kwargs):
-        message = "Unknown lookup type: \"{}\"".format(lookup.type)
+    def __init__(self, lookup_type, *args, **kwargs):
+        message = "Unknown lookup type: \"{}\"".format(lookup_type)
         super(UnknownLookupType, self).__init__(message, *args, **kwargs)
 
 
 class FailedVariableLookup(Exception):
 
-    def __init__(self, variable_name, error, *args, **kwargs):
-        message = "Couldn't resolve lookups in variable `%s`. " % variable_name
-        message += "%s" % error
+    def __init__(self, variable_name, lookup, error, *args, **kwargs):
+        self.lookup = lookup
+        self.error = error
+        message = "Couldn't resolve lookup in variable `%s`, " % variable_name
+        message += "lookup: ${%s}: " % repr(lookup)
+        message += "(%s) %s" % (error.__class__, error)
         super(FailedVariableLookup, self).__init__(message, *args, **kwargs)
+
+
+class FailedLookup(Exception):
+    """
+    Intermediary Exception to be converted to FailedVariableLookup once it
+    bubbles up there
+    """
+    def __init__(self, lookup, error, *args, **kwargs):
+        self.lookup = lookup
+        self.error = error
+        super(FailedLookup, self).__init__("Failed lookup", *args, **kwargs)
 
 
 class InvalidUserdataPlaceholder(Exception):
@@ -59,6 +89,17 @@ class UnresolvedVariable(Exception):
             )
         )
         super(UnresolvedVariable, self).__init__(message, *args, **kwargs)
+
+
+class UnresolvedVariableValue(Exception):
+    """
+    Intermediary Exception to be converted to UnresolvedVariable once it
+    bubbles up there
+    """
+    def __init__(self, lookup, *args, **kwargs):
+        self.lookup = lookup
+        super(UnresolvedVariableValue, self).__init__(
+            "Unresolved lookup", *args, **kwargs)
 
 
 class MissingVariable(Exception):
@@ -210,10 +251,25 @@ class StackUpdateBadStatus(Exception):
 
 class PlanFailed(Exception):
 
-    def __init__(self, failed_stacks, *args, **kwargs):
-        self.failed_stacks = failed_stacks
+    def __init__(self, failed_steps, *args, **kwargs):
+        self.failed_steps = failed_steps
 
-        stack_names = ', '.join(stack.name for stack in failed_stacks)
-        message = "The following stacks failed: %s\n" % (stack_names,)
+        step_names = ', '.join(step.name for step in failed_steps)
+        message = "The following steps failed: %s" % (step_names,)
 
         super(PlanFailed, self).__init__(message, *args, **kwargs)
+
+
+class GraphError(Exception):
+    """Raised when the graph is invalid (e.g. acyclic dependencies)
+    """
+
+    def __init__(self, exception, stack, dependency):
+        self.stack = stack
+        self.dependency = dependency
+        self.exception = exception
+        message = (
+            "Error detected when adding '%s' "
+            "as a dependency of '%s': %s"
+        ) % (dependency, stack, str(exception))
+        super(GraphError, self).__init__(message)

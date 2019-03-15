@@ -1,8 +1,26 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import object
 from mock import MagicMock
 
 from stacker.context import Context
 from stacker.config import Config, Stack
 from stacker.lookups import Lookup
+
+
+class MockThreadingEvent(object):
+    def wait(self, timeout=None):
+        return False
+
+
+class MockProviderBuilder(object):
+    def __init__(self, provider, region=None):
+        self.provider = provider
+        self.region = region
+
+    def build(self, region=None, profile=None):
+        return self.provider
 
 
 def mock_provider(**kwargs):
@@ -14,10 +32,13 @@ def mock_context(namespace="default", extra_config_args=None, **kwargs):
     if extra_config_args:
         config_args.update(extra_config_args)
     config = Config(config_args)
-    environment = kwargs.get("environment", {})
+    if kwargs.get("environment"):
+        return Context(
+            config=config,
+            **kwargs)
     return Context(
         config=config,
-        environment=environment,
+        environment={},
         **kwargs)
 
 
@@ -38,7 +59,7 @@ def mock_lookup(lookup_input, lookup_type, raw=None):
     return Lookup(type=lookup_type, input=lookup_input, raw=raw)
 
 
-class SessionStub:
+class SessionStub(object):
 
     """Stubber class for boto3 sessions made with session_cache.get_session()
 

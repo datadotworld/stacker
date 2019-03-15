@@ -1,3 +1,8 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import str
+from builtins import object
 import copy
 import uuid
 import importlib
@@ -9,7 +14,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import time
 import zipfile
 
 import collections
@@ -19,75 +23,13 @@ import botocore.client
 import botocore.exceptions
 import dateutil
 import yaml
-from git import Repo
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
+from .awscli_yamlhelper import yaml_parse
 from stacker.session_cache import get_session
 
 logger = logging.getLogger(__name__)
-
-
-def retry_with_backoff(function, args=None, kwargs=None, attempts=5,
-                       min_delay=1, max_delay=3, exc_list=None,
-                       retry_checker=None):
-    """Retries function, catching expected Exceptions.
-
-    Each retry has a delay between `min_delay` and `max_delay` seconds,
-    increasing with each attempt.
-
-    Args:
-        function (function): The function to call.
-        args (list, optional): A list of positional arguments to pass to the
-            given function.
-        kwargs (dict, optional): Keyword arguments to pass to the given
-            function.
-        attempts (int, optional): The # of times to retry the function.
-            Default: 5
-        min_delay (int, optional): The minimum time to delay retries, in
-            seconds. Default: 1
-        max_delay (int, optional): The maximum time to delay retries, in
-            seconds. Default: 5
-        exc_list (list, optional): A list of :class:`Exception` classes that
-            should be retried. Default: [:class:`Exception`,]
-        retry_checker (func, optional): An optional function that is used to
-            do a deeper analysis on the received :class:`Exception` to
-            determine if it qualifies for retry. Receives a single argument,
-            the :class:`Exception` object that was caught. Should return
-            True if it should be retried.
-
-    Returns:
-        variable: Returns whatever the given function returns.
-
-    Raises:
-        :class:`Exception`: Raises whatever exception the given function
-            raises, if unable to succeed within the given number of attempts.
-    """
-    args = args or []
-    kwargs = kwargs or {}
-    attempt = 0
-    if not exc_list:
-        exc_list = (Exception, )
-    while True:
-        attempt += 1
-        logger.debug("Calling %s, attempt %d.", function, attempt)
-        sleep_time = min(max_delay, min_delay * attempt)
-        try:
-            return function(*args, **kwargs)
-        except exc_list as e:
-            # If there is no retry checker function, or if there is and it
-            # returns True, then go ahead and retry
-            if not retry_checker or retry_checker(e):
-                if attempt == attempts:
-                    logger.error("Function %s failed after %s retries. Giving "
-                                 "up.", function.func_name, attempts)
-                    raise
-                logger.debug("Caught expected exception: %r", e)
-            # If there is a retry checker function, and it returned False,
-            # do not retry
-            else:
-                raise
-        time.sleep(sleep_time)
 
 
 def camel_to_snake(name):
@@ -288,7 +230,7 @@ def merge_map(a, b):
     if not isinstance(a, dict) or not isinstance(b, dict):
         return b
 
-    for key in b.keys():
+    for key in b:
         a[key] = merge_map(a[key], b[key]) if key in a else b[key]
     return a
 
@@ -338,12 +280,12 @@ def yaml_to_ordered_dict(stream, loader=yaml.SafeLoader):
                     None, None,
                     "expected a mapping node, but found %s" % node.id,
                     node.start_mark)
-            mapping = {}
+            mapping = OrderedDict()
             for key_node, value_node in node.value:
                 key = self.construct_object(key_node, deep=deep)
                 try:
                     hash(key)
-                except TypeError, exc:
+                except TypeError as exc:
                     raise ConstructorError(
                         "while constructing a mapping", node.start_mark,
                         "found unhashable key (%s)" % exc, key_node.start_mark
@@ -365,8 +307,17 @@ def yaml_to_ordered_dict(stream, loader=yaml.SafeLoader):
             """Override parent method to use OrderedDict."""
             if isinstance(node, MappingNode):
                 self.flatten_mapping(node)
-            return OrderedDict(self._validate_mapping(node, deep=deep))
+            return self._validate_mapping(node, deep=deep)
 
+        def construct_yaml_map(self, node):
+            data = OrderedDict()
+            yield data
+            value = self.construct_mapping(node)
+            data.update(value)
+
+    OrderedUniqueLoader.add_constructor(
+        u'tag:yaml.org,2002:map', OrderedUniqueLoader.construct_yaml_map,
+    )
     return yaml.load(stream, OrderedUniqueLoader)
 
 
@@ -417,6 +368,11 @@ def handle_hooks(stage, hooks, provider, context):
         data_key = hook.data_key
         required = hook.required
         kwargs = hook.args or {}
+        enabled = hook.enabled
+        if not enabled:
+            logger.debug("hook with method %s is disabled, skipping",
+                         hook.path)
+            continue
         try:
             method = load_object_from_string(hook.path)
         except (AttributeError, ImportError):
@@ -560,6 +516,17 @@ def ensure_s3_bucket(s3_client, bucket_name, bucket_region):
             raise
 
 
+def parse_cloudformation_template(template):
+    """Parse CFN template string.
+
+    Leverages the vendored aws-cli yamlhelper to handle JSON or YAML templates.
+
+    Args:
+        template (str): The template body.
+    """
+    return yaml_parse(template)
+
+
 class Extractor(object):
     """Base class for extractors."""
 
@@ -661,12 +628,27 @@ class SourceProcessor(object):
 
     def get_package_sources(self):
         """Make remote python packages available for local use."""
+        # Checkout local modules
+        for config in self.sources.get('local', []):
+            self.fetch_local_package(config=config)
         # Checkout S3 repositories specified in config
         for config in self.sources.get('s3', []):
             self.fetch_s3_package(config=config)
         # Checkout git repositories specified in config
         for config in self.sources.get('git', []):
             self.fetch_git_package(config=config)
+
+    def fetch_local_package(self, config):
+        """Make a local path available to current stacker config.
+
+        Args:
+            config (dict): 'local' path config dictionary
+
+        """
+        # Update sys.path & merge in remote configs (if necessary)
+        self.update_paths_and_config(config=config,
+                                     pkg_dir_name=config['source'],
+                                     pkg_cache_dir=os.getcwd())
 
     def fetch_s3_package(self, config):
         """Make a remote S3 archive available for local use.
@@ -679,7 +661,7 @@ class SourceProcessor(object):
                          '.tar': TarExtractor,
                          '.zip': ZipExtractor}
         extractor = None
-        for suffix, klass in extractor_map.iteritems():
+        for suffix, klass in extractor_map.items():
             if config['key'].endswith(suffix):
                 extractor = klass()
                 logger.debug("Using extractor %s for S3 object \"%s\" in "
@@ -773,6 +755,10 @@ class SourceProcessor(object):
             config (dict): git config dictionary
 
         """
+        # only loading git here when needed to avoid load errors on systems
+        # without git installed
+        from git import Repo
+
         ref = self.determine_git_ref(config)
         dir_name = self.sanitize_git_path(uri=config['uri'], ref=ref)
         cached_dir_path = os.path.join(self.package_cache_dir, dir_name)
@@ -802,21 +788,25 @@ class SourceProcessor(object):
         self.update_paths_and_config(config=config,
                                      pkg_dir_name=dir_name)
 
-    def update_paths_and_config(self, config, pkg_dir_name):
+    def update_paths_and_config(self, config, pkg_dir_name,
+                                pkg_cache_dir=None):
         """Handle remote source defined sys.paths & configs.
 
         Args:
             config (dict): git config dictionary
             pkg_dir_name (string): directory name of the stacker archive
+            pkg_cache_dir (string): fully qualified path to stacker cache
+                                    cache directory
 
         """
-        cached_dir_path = os.path.join(self.package_cache_dir, pkg_dir_name)
+        if pkg_cache_dir is None:
+            pkg_cache_dir = self.package_cache_dir
+        cached_dir_path = os.path.join(pkg_cache_dir, pkg_dir_name)
 
         # Add the appropriate directory (or directories) to sys.path
         if config.get('paths'):
             for path in config['paths']:
-                path_to_append = os.path.join(self.package_cache_dir,
-                                              pkg_dir_name,
+                path_to_append = os.path.join(cached_dir_path,
                                               path)
                 logger.debug("Appending \"%s\" to python sys.path",
                              path_to_append)
@@ -847,12 +837,12 @@ class SourceProcessor(object):
                                                    'ls-remote',
                                                    uri,
                                                    ref])
-        if "\t" in lsremote_output:
-            commit_id = lsremote_output.split("\t")[0]
+        if b"\t" in lsremote_output:
+            commit_id = lsremote_output.split(b"\t")[0]
             logger.debug("Matching commit id found: %s", commit_id)
             return commit_id
         else:
-            raise ValueError("Ref \"%s\" not found for repo %d." % (ref, uri))
+            raise ValueError("Ref \"%s\" not found for repo %s." % (ref, uri))
 
     def determine_git_ls_remote_ref(self, config):
         """Determine the ref to be used with the "git ls-remote" command.
@@ -906,6 +896,8 @@ class SourceProcessor(object):
                 config['uri'],
                 self.determine_git_ls_remote_ref(config)
             )
+        if sys.version_info[0] > 2 and isinstance(ref, bytes):
+            return ref.decode()
         return ref
 
     def sanitize_uri_path(self, uri):
@@ -942,3 +934,19 @@ class SourceProcessor(object):
         if ref is not None:
             dir_name += "-%s" % ref
         return dir_name
+
+
+def stack_template_key_name(blueprint):
+    """Given a blueprint, produce an appropriate key name.
+
+    Args:
+        blueprint (:class:`stacker.blueprints.base.Blueprint`): The blueprint
+            object to create the key from.
+
+    Returns:
+        string: Key name resulting from blueprint.
+    """
+    name = blueprint.name
+    return "stack_templates/%s/%s-%s.json" % (blueprint.context.get_fqn(name),
+                                              name,
+                                              blueprint.version)

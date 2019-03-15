@@ -1,8 +1,13 @@
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+from builtins import object
 import collections
 import logging
 
 from stacker.config import Config
 from .stack import Stack
+from .target import Target
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +26,7 @@ def get_fqn(base_fqn, delimiter, name=None):
     if name and name.startswith("%s%s" % (base_fqn, delimiter)):
         return name
 
-    return delimiter.join(filter(None, [base_fqn, name]))
+    return delimiter.join([_f for _f in [base_fqn, name] if _f])
 
 
 class Context(object):
@@ -45,11 +50,9 @@ class Context(object):
     def __init__(self, environment=None,
                  stack_names=None,
                  config=None,
-                 logger_type=None,
                  force_stacks=None):
         self.environment = environment
         self.stack_names = stack_names or []
-        self.logger_type = logger_type
         self.config = config or Config()
         self.force_stacks = force_stacks or []
         self.hook_data = {}
@@ -119,10 +122,22 @@ class Context(object):
         return self.config.mappings or {}
 
     def _get_stack_definitions(self):
-        if not self.stack_names:
-            return self.config.stacks
-        return [s for s in self.config.stacks if s.name in
-                self.stack_names]
+        return self.config.stacks
+
+    def get_targets(self):
+        """Returns the named targets that are specified in the config.
+
+        Returns:
+            list: a list of :class:`stacker.target.Target` objects
+
+        """
+        if not hasattr(self, "_targets"):
+            targets = []
+            for target_def in self.config.targets or []:
+                target = Target(target_def)
+                targets.append(target)
+            self._targets = targets
+        return self._targets
 
     def get_stacks(self):
         """Get the stacks for the current action.
@@ -134,20 +149,27 @@ class Context(object):
             list: a list of :class:`stacker.stack.Stack` objects
 
         """
-        stacks = []
-        definitions = self._get_stack_definitions()
-        for stack_def in definitions:
-            stack = Stack(
-                definition=stack_def,
-                context=self,
-                mappings=self.mappings,
-                force=stack_def.name in self.force_stacks,
-                locked=stack_def.locked,
-                enabled=stack_def.enabled,
-                protected=stack_def.protected,
-            )
-            stacks.append(stack)
-        return stacks
+        if not hasattr(self, "_stacks"):
+            stacks = []
+            definitions = self._get_stack_definitions()
+            for stack_def in definitions:
+                stack = Stack(
+                    definition=stack_def,
+                    context=self,
+                    mappings=self.mappings,
+                    force=stack_def.name in self.force_stacks,
+                    locked=stack_def.locked,
+                    enabled=stack_def.enabled,
+                    protected=stack_def.protected,
+                )
+                stacks.append(stack)
+            self._stacks = stacks
+        return self._stacks
+
+    def get_stack(self, name):
+        for stack in self.get_stacks():
+            if stack.name == name:
+                return stack
 
     def get_stacks_dict(self):
         return dict((stack.fqn, stack) for stack in self.get_stacks())

@@ -1,0 +1,119 @@
+version: 2
+
+workflows:
+  version: 2
+  test-all:
+    jobs:
+      - lint
+      - unit-test-27:
+          requires:
+            - lint
+      - functional-test-27:
+          requires:
+            - unit-test-27
+      - unit-test-35:
+          requires:
+            - lint
+      - functional-test-35:
+          requires:
+            - unit-test-35
+            - functional-test-27
+      - unit-test-36:
+          requires:
+            - lint
+      - functional-test-36:
+          requires:
+            - unit-test-36
+            - functional-test-35
+      - unit-test-37:
+          requires:
+            - lint
+      - functional-test-37:
+          requires:
+            - unit-test-37
+            - functional-test-36
+      - cleanup-functional-buckets:
+          requires:
+            - functional-test-27
+            - functional-test-35
+            - functional-test-36
+            - functional-test-37
+
+jobs:
+  lint:
+    docker:
+      - image: circleci/python:3.6
+    steps:
+      - checkout
+      - run: sudo pip install flake8 codecov pep8-naming flake8-future-import
+      - run: sudo python setup.py install
+      - run: flake8 --version
+      - run: sudo make lint
+
+  unit-test-27:
+    docker:
+      - image: circleci/python:2.7
+    steps: &unit_test_steps
+      - checkout
+      - run: sudo python setup.py install
+      - run: sudo make test-unit
+
+  unit-test-35:
+    docker:
+      - image: circleci/python:3.5
+    steps: *unit_test_steps
+
+  unit-test-36:
+    docker:
+      - image: circleci/python:3.6
+    steps: *unit_test_steps
+
+  unit-test-37:
+    docker:
+      - image: circleci/python:3.7
+    steps: *unit_test_steps
+
+  functional-test-27:
+    docker:
+      - image: circleci/python:2.7
+    steps: &functional_test_steps
+      - checkout
+      - run:
+          command: |
+            git clone https://github.com/bats-core/bats-core.git
+            cd bats-core
+            git checkout v1.0.2
+            sudo ./install.sh /usr/local
+            bats --version
+      - run: sudo python setup.py install
+      - run:
+          command: |
+            export TERM=xterm
+            export AWS_DEFAULT_REGION=us-east-1
+            export STACKER_NAMESPACE=cloudtools-functional-tests-$CIRCLE_BUILD_NUM
+            export STACKER_ROLE=arn:aws:iam::459170252436:role/cloudtools-functional-tests-sta-FunctionalTestRole-1M9HFJ9VQVMFX
+            sudo -E make test-functional
+
+  functional-test-35:
+    docker:
+      - image: circleci/python:3.5
+    steps: *functional_test_steps
+
+  functional-test-36:
+    docker:
+      - image: circleci/python:3.6
+    steps: *functional_test_steps
+
+  functional-test-37:
+    docker:
+      - image: circleci/python:3.7
+    steps: *functional_test_steps
+
+  cleanup-functional-buckets:
+    docker:
+      - image: circleci/python:2.7
+    steps:
+      - checkout
+      - run:
+          command: |
+            tests/cleanup_functional_test_buckets.sh

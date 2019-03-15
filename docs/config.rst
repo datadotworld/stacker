@@ -156,8 +156,14 @@ For ``.tar.gz`` & ``zip`` archives on s3, specify a ``bucket`` & ``key``::
           # last modified date on S3 changes
           use_latest: false
 
-Use the ``paths`` option when subdirectories of the repo/archive should be
-added to Stacker's ``sys.path``.
+Local directories can also be specified::
+
+    package_sources:
+      local:
+        - source: ../vpc
+
+Use the ``paths`` option when subdirectories of the repo/archive/directory
+should be added to Stacker's ``sys.path``.
 
 Cloned repos/archives will be cached between builds; the cache location defaults
 to ~/.stacker but can be manually specified via the **stacker_cache_dir** top
@@ -187,6 +193,7 @@ paths can optionally be defined as dictionaries, e.g.::
     my_route53_hook:
       path: stacker.hooks.route53.create_domain:
       required: true
+      enabled: true
       args:
         domain: mydomain.com
   stacks:
@@ -203,8 +210,9 @@ Pre & Post Hooks
 ----------------
 
 Many actions allow for pre & post hooks. These are python methods that are
-executed before, and after the action is taken for the entire config. Only the
-following actions allow pre/post hooks:
+executed before, and after the action is taken for the entire config. Hooks 
+can be enabled or disabled, per hook. Only the following actions allow
+pre/post hooks:
 
 * build (keywords: *pre_build*, *post_build*)
 * destroy (keywords: *pre_destroy*, *post_destroy*)
@@ -218,9 +226,13 @@ The keyword is a list of dictionaries with the following keys:
   the python import path to the hook
 **data_key:**
   If set, and the hook returns data (a dictionary), the results will be stored
-  in the context.hook_data with the data_key as it's key.
+  in the context.hook_data with the data_key as its key.
 **required:**
   whether to stop execution if the hook fails
+**enabled:**
+  whether to execute the hook every stacker run. Default: True. This is a bool
+  that grants you the ability to execute a hook per environment when combined
+  with a variable pulled from an environment file.
 **args:**
   a dictionary of arguments to pass to the hook
 
@@ -230,6 +242,19 @@ the build action::
   pre_build:
     - path: stacker.hooks.route53.create_domain
       required: true
+      enabled: true
+      args:
+        domain: mydomain.com
+
+An example of a hook using the ``create_domain_bool`` variable from the environment
+file to determine if hook should run. Set ``create_domain_bool: true`` or
+``create_domain_bool: false`` in the environment file to determine if the hook
+should run in the environment stacker is running against::
+
+  pre_build:
+    - path: stacker.hooks.route53.create_domain
+      required: true
+      enabled: ${create_domain_bool}
       args:
         domain: mydomain.com
 
@@ -312,10 +337,20 @@ stack to be built.
 A stack has the following keys:
 
 **name:**
-  The base name for the stack (note: the namespace from the environment
-  will be prepended to this)
+  The logical name for this stack, which can be used in conjuction with the
+  ``output`` lookup. The value here must be unique within the config. If no
+  ``stack_name`` is provided, the value here will be used for the name of the
+  CloudFormation stack.
 **class_path:**
-  The python class path to the Blueprint to be used.
+  The python class path to the Blueprint to be used. Specify this or
+  ``template_path`` for the stack.
+**template_path:**
+  Path to raw CloudFormation template (JSON or YAML). Specify this or
+  ``class_path`` for the stack. Path can be specified relative to the current
+  working directory (e.g. templates stored alongside the Config), or relative
+  to a directory in the python ``sys.path`` (i.e. for loading templates
+  retrieved via ``packages_sources``).
+
 **description:**
   A short description to apply to the stack. This overwrites any description
   provided in the Blueprint. See: http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/template-description-structure.html
@@ -328,7 +363,8 @@ A stack has the following keys:
   updated unless the stack is passed to stacker via the *--force* flag.
   This is useful for *risky* stacks that you don't want to take the
   risk of allowing CloudFormation to update, but still want to make
-  sure get launched when the environment is first created.
+  sure get launched when the environment is first created. When ``locked``,
+  it's not necessary to specify a ``class_path`` or ``template_path``.
 **enabled:**
   (optional) If set to false, the stack is disabled, and will not be
   built or updated. This can allow you to disable stacks in different
@@ -341,9 +377,42 @@ A stack has the following keys:
   (optional) a list of other stacks this stack requires. This is for explicit
   dependencies - you do not need to set this if you refer to another stack in
   a Parameter, so this is rarely necessary.
+**required_by:**
+  (optional) a list of other stacks or targets that require this stack. It's an
+  inverse to ``requires``.
 **tags:**
   (optional) a dictionary of CloudFormation tags to apply to this stack. This
   will be combined with the global tags, but these tags will take precendence.
+**stack_name:**
+  (optional) If provided, this will be used as the name of the CloudFormation
+  stack. Unlike ``name``, the value doesn't need to be unique within the config,
+  since you could have multiple stacks with the same name, but in different
+  regions or accounts. (note: the namespace from the environment will be
+  prepended to this)
+**region**:
+  (optional): If provided, specifies the name of the region that the
+  CloudFormation stack should reside in. If not provided, the default region
+  will be used (``AWS_DEFAULT_REGION``, ``~/.aws/config`` or the ``--region``
+  flag). If both ``region`` and ``profile`` are specified, the value here takes
+  precedence over the value in the profile.
+**profile**:
+  (optional): If provided, specifies the name of a AWS profile to use when
+  performing AWS API calls for this stack. This can be used to provision stacks
+  in multiple accounts or regions.
+**stack_policy_path**:
+  (optional): If provided, specifies the path to a JSON formatted stack policy
+  that will be applied when the CloudFormation stack is created and updated.
+  You can use stack policies to prevent CloudFormation from making updates to
+  protected resources (e.g. databases). See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/protect-stack-resources.html
+**in_progress_behavior**:
+  (optional): If provided, specifies the behavior for when a stack is in
+  `CREATE_IN_PROGRESS` or `UPDATE_IN_PROGRESS`. By default, stacker will raise
+  an exception if the stack is in an `IN_PROGRESS` state. You can set this
+  option to `wait` and stacker will wait for the previous update to complete
+  before attempting to update the stack.
+
+Stacks Example
+~~~~~~~~~~~~~~
 
 Here's an example from stacker_blueprints_, used to create a VPC::
 
@@ -368,6 +437,58 @@ Here's an example from stacker_blueprints_, used to create a VPC::
           - 10.128.16.0/22
           - 10.128.20.0/22
         CidrBlock: 10.128.0.0/16
+
+Targets
+-------
+
+In stacker, **targets** can be used as a lightweight method to group a number
+of stacks together, as a named "target" in the graph. Internally, this adds a
+node to the underlying DAG, which can then be used alongside the `--targets`
+flag. If you're familiar with the concept of "targets" in systemd, the concept
+is the same.
+
+**name:**
+  The logical name for this target.
+**requires:**
+  (optional) a list of stacks or other targets this target requires.
+**required_by:**
+  (optional) a list of stacks or other targets that require this target.
+
+Here's an example of a target that will execute all "database" stacks::
+
+  targets:
+    - name: databases
+
+  stacks:
+    - name: dbA
+      class_path: blueprints.DB
+      required_by:
+        - databases
+    - name: dbB
+      class_path: blueprints.DB
+      required_by:
+        - databases
+
+Custom Log Formats
+------------------
+
+By default, stacker uses the following `log_formats`::
+
+  log_formats:
+    info: "[%(asctime)s] %(message)s"
+    color: "[%(asctime)s] \033[%(color)sm%(message)s\033[39m"
+    debug: "[%(asctime)s] %(levelname)s %(threadName)s %(name)s:%(lineno)d(%(funcName)s): %(message)s"
+
+You may optionally provide custom `log_formats`. In this example, we add the environment name to each log line::
+
+  log_formats:
+    info: "[%(asctime)s] ${environment} %(message)s"
+    color: "[%(asctime)s] ${environment} \033[%(color)sm%(message)s\033[39m"
+    
+You may use any of the standard Python
+`logging module format attributes <https://docs.python.org/2.7/library/logging.html#logrecord-attributes>`_
+when building your `log_formats`.
+
 
 Variables
 ==========
@@ -394,7 +515,7 @@ them taking it as a Variable. Rather than having to enter the domain into
 each stack (and hopefully not typo'ing any of them) you could do the
 following::
 
-  domain_name: mydomain.com &domain
+  domain_name: &domain mydomain.com
 
 Now you have an anchor called **domain** that you can use in place of any value
 in the config to provide the value **mydomain.com**. You use the anchor with
@@ -465,6 +586,48 @@ Note: Doing this creates an implicit dependency from the *webservers* stack
 to the *vpc* stack, which will cause stacker to submit the *vpc* stack, and
 then wait until it is complete until it submits the *webservers* stack.
 
+Multi Account/Region Provisioning
+---------------------------------
+
+You can use stacker to manage CloudFormation stacks in multiple accounts and
+regions, and reference outputs across them.
+
+As an example, let's say you had 3 accounts you wanted to manage:
+
+#) OpsAccount: An AWS account that has IAM users for employees.
+#) ProdAccount: An AWS account for a "production" environment.
+#) StageAccount: An AWS account for a "staging" environment.
+
+You want employees with IAM user accounts in OpsAccount to be able to assume
+roles in both the ProdAccount and StageAccount. You can use stacker to easily
+manage this::
+
+
+  stacks:
+    # Create some stacks in both the "prod" and "stage" accounts with IAM roles
+    # that employees can use.
+    - name: prod/roles
+      profile: prod
+      class_path: blueprints.Roles
+    - name: stage/roles
+      profile: stage
+      class_path: blueprints.Roles
+
+    # Create a stack in the "ops" account and grant each employee access to
+    # assume the roles we created above.
+    - name: users
+      profile: ops
+      class_path: blueprints.IAMUsers
+      variables:
+        Users:
+          john-smith:
+            Roles:
+              - ${output prod/roles::EmployeeRoleARN}
+              - ${output stage/roles::EmployeeRoleARN}
+
+
+Note how I was able to reference outputs from stacks in multiple accounts using the `output` plugin!
+
 Environments
 ============
 
@@ -493,4 +656,5 @@ submitting it to CloudFormation. For more information, see the
 .. _`anchors & references`: https://en.wikipedia.org/wiki/YAML#Repeated_nodes
 .. _Mappings: http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/mappings-section-structure.html
 .. _Outputs: http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/outputs-section-structure.html
-.. _stacker_blueprints: https://github.com/remind101/stacker_blueprints
+.. _stacker_blueprints: https://github.com/cloudtools/stacker_blueprints
+.. _`AWS profiles`: https://docs.aws.amazon.com/cli/latest/userguide/cli-multiple-profiles.html

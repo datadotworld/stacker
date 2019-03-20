@@ -56,7 +56,11 @@ dist/
 .eggs/
 *.egg
 
-# Coverage artifacts
+# IntelliJ IDEA
+*.iml
+.idea
+
+# nosetest --with-coverage dumps these in CWD
 .coverage
 htmlcov
 

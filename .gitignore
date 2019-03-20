@@ -62,15 +62,11 @@ dist/
 
 # nosetest --with-coverage dumps these in CWD
 .coverage
-
-
-
-vm_setup.sh
+htmlcov
 
 # Ignore development conf/env files
 dev.yaml
 dev.env
-
 tests/fixtures/blueprints/*-result
-
 FakeKey.pem
+vm_setup.sh

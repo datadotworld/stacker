@@ -335,6 +335,10 @@ class Plan(object):
             os.makedirs(directory)
 
         def walk_func(step):
+            # Skip targets
+            if not hasattr(step.stack, "blueprint"):
+                return True
+
             step.stack.resolve(
                 context=context,
                 provider=provider,

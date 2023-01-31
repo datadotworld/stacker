@@ -1,7 +1,7 @@
 import os
 from setuptools import setup, find_packages
 
-VERSION = "1.7.0"
+VERSION = "1.7.2"
 
 src_dir = os.path.dirname(__file__)
 
@@ -9,14 +9,18 @@ install_requires = [
     "future",
     "troposphere>=1.9.0",
     'botocore>=1.12.111',  # matching boto3 requirement
-    "boto3>=1.9.111<2.0",
+    "boto3>=1.9.111,<2.0",
     "PyYAML>=3.13b1",
     "awacs>=0.6.0",
     "gitpython>=2.0,<3.0",
-    "jinja2>=2.7,<3.0",
+    "jinja2>=2.7,<3.0a",
     "schematics>=2.0.1,<2.1.0",
     "formic2",
     "python-dateutil>=2.0,<3.0",
+    "MarkupSafe<2.0", # 2.0 dropped python 2.7, 3.5 support - temporary
+    "more-itertools<6.0.0", # 6.0.0 dropped python 2.7 support - temporary
+    "rsa==4.5", # 4.6 dropped python 2.7 support - temporary
+    "python-jose<3.2.0", # 3.2.0 dropped python 2.7 support - temporary
 ]
 
 setup_requires = ['pytest-runner']
@@ -25,7 +29,7 @@ tests_require = [
     "pytest~=4.3",
     "pytest-cov~=2.6",
     "mock~=2.0",
-    "moto~=1.3.7",
+    "moto[awslambda]~=1.3.16",
     "testfixtures~=4.10.0",
     "flake8-future-import",
 ]

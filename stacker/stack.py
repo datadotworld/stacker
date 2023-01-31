@@ -54,12 +54,23 @@ class Stack(object):
             blueprint.
         locked (bool, optional): Whether or not the stack is locked.
         force (bool, optional): Whether to force updates on this stack.
-        enabled (bool, optional): Whether this stack is enabled
+        enabled (bool, optional): Whether this stack is enabled.
+        protected (boot, optional): Whether this stack is protected.
+        notification_arns (list, optional): An optional list of SNS topic ARNs
+            to send CloudFormation Events to.
 
     """
 
-    def __init__(self, definition, context, variables=None, mappings=None,
-                 locked=False, force=False, enabled=True, protected=False):
+    def __init__(
+        self, definition, context,
+        variables=None,
+        mappings=None,
+        locked=False,
+        force=False,
+        enabled=True,
+        protected=False,
+        notification_arns=None,
+    ):
         self.logging = True
         self.name = definition.name
         self.fqn = context.get_fqn(definition.stack_name or self.name)
@@ -75,6 +86,7 @@ class Stack(object):
         self.context = context
         self.outputs = None
         self.in_progress_behavior = definition.in_progress_behavior
+        self.notification_arns = notification_arns
 
     def __repr__(self):
         return self.fqn
@@ -85,12 +97,6 @@ class Stack(object):
 
     @property
     def requires(self):
-        # By definition, a locked stack has no dependencies, because we won't
-        # be performing an update operation on the stack. This means, resolving
-        # outputs from dependencies is unnecessary.
-        if self.locked and not self.force:
-            return []
-
         requires = set(self.definition.requires or [])
 
         # Add any dependencies based on output lookups

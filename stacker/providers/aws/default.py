@@ -309,6 +309,7 @@ def wait_till_change_set_complete(cfn_client, change_set_id, try_count=25,
     for i in range(try_count):
         response = cfn_client.describe_change_set(
             ChangeSetName=change_set_id,
+            IncludePropertyValues=True
         )
         complete = response["Status"] in ("FAILED", "CREATE_COMPLETE")
         if complete:

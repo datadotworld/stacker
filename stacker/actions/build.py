@@ -32,7 +32,11 @@ logger = logging.getLogger(__name__)
 
 def build_stack_tags(stack):
     """Builds a common set of tags to attach to a stack"""
-    return [{'Key': t[0], 'Value': t[1]} for t in stack.tags.items()]
+    tags = [{'Key': t[0], 'Value': t[1]} for t in stack.tags.items()]
+    # By default, set the AWS Systems Manager Application Manager tag to the stack name
+    if 'AppManagerCFNStackKey' not in stack.tags:
+        tags.append({'Key': 'AppManagerCFNStackKey', 'Value': stack.fqn})
+    return tags
 
 
 def should_update(stack):
